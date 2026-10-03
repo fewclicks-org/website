@@ -1,385 +1,384 @@
-// Studio Portfolio: a modern single-page site. Cinematic loader → hero slideshow → editorial game list.
-// Game details open in a full-screen panel on the same page (deep link: #game/<id>).
+// Studio Portfolio "Lens": scramble loader → grayscale art wall with a color-revealing cursor lens →
+// games on an infinite draggable canvas → sticky manifesto. Game details open in a circle-wipe panel (#game/<id>).
 
 import { loadAll, html, raw, formatDate, starString, storeLabel, trailerHtml, compactNumber, STATUS, PLATFORMS, filterGames } from '../../shared/js/data.js';
 import { sfx, mountSoundToggle } from '../../shared/js/sfx.js';
 import { reducedMotion, coarsePointer } from '../../shared/js/motion.js';
-import { setGameSeo, setMeta } from '../../shared/js/seo.js';
 import { mountPrototypeBadge } from '../../shared/js/proto-badge.js';
 import { bindLightbox, bindDialog, bindEmailCopy, gameFacts, loadFailed, reveal } from '../../shared/js/kit.js';
+import { createLoader, preloadAll, gameRouter, toaster } from '../../shared/js/spa.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const main = $('#main');
-const LOGO = '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12.5 9 L12.5 23 L16 19.6 L18.6 25 L20.8 24 L18.2 18.7 L23 18.7Z" fill="currentColor"/></svg>';
+const HOME_TITLE = 'FewClicks: games you can love in a few clicks';
 const year = (d) => (d ? String(d).slice(0, 4) : 'TBA');
-
-let DATA;
-const loader = mountLoader();
-start();
+const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*+=?';
 
 // ---------------- loader ----------------
-function mountLoader() {
-  const el = document.createElement('div');
-  el.className = 'loader';
-  el.setAttribute('role', 'status');
-  el.setAttribute('aria-label', 'Loading');
-  el.innerHTML = `<div class="loader-inner">
-    <svg class="loader-mark" viewBox="0 0 54 54" aria-hidden="true"><path d="M27 2 a25 25 0 1 1 -0.1 0 Z M21 15 L21 39 L27 33 L31.5 42 L35 40.5 L30.6 31.4 L39 31.4 Z"/></svg>
-    <div class="loader-pct" data-pct>0</div>
-    <div class="loader-bar"><i data-bar></i></div>
-    <div class="loader-row"><span class="mono" data-msg>Initializing</span><span class="mono">FewClicks Studio</span></div></div>`;
-  document.body.appendChild(el);
-  document.body.classList.add('locked');
-  const msgs = ['Initializing', 'Compiling shaders', 'Streaming worlds', 'Spawning players', 'Polishing pixels', 'Ready'];
-  let shown = 0, target = 0, raf;
-  const pct = $('[data-pct]', el), bar = $('[data-bar]', el), msg = $('[data-msg]', el);
+const L = document.createElement('div');
+L.className = 'loader';
+L.setAttribute('role', 'status');
+L.setAttribute('aria-label', 'Loading');
+L.innerHTML = '<div class="half top"></div><div class="half bot"></div><div class="ui"><div class="line"><i data-line></i></div><div class="word" data-word aria-hidden="true">FEWCLICKS</div><span class="mono lbl" data-lbl>Loading worlds</span><span class="pct" data-pct>00</span></div>';
+document.body.appendChild(L);
+document.body.classList.add('locked');
+let titles = ['FEWCLICKS'];
+let wordI = 0, lastSwap = 0;
+const loader = createLoader({
+  minMs: 2000,
+  render: (p) => {
+    $('[data-pct]', L).textContent = String(Math.round(p)).padStart(2, '0');
+    $('[data-line]', L).style.setProperty('--p', p / 100);
+    const now = performance.now();
+    if (now - lastSwap > 380 && p < 96) { lastSwap = now; scramble($('[data-word]', L), titles[wordI++ % titles.length].toUpperCase(), 320); }
+    if (p >= 96) $('[data-word]', L).textContent = 'FEWCLICKS';
+  },
+  onFinish: () => {
+    L.classList.add('done');
+    document.body.classList.remove('locked');
+    sfx.whoosh();
+    setTimeout(() => L.remove(), 1300);
+  },
+});
+
+function scramble(el, target, ms = 500) {
+  if (reducedMotion) { el.textContent = target; return; }
   const t0 = performance.now();
-  const tick = () => {
-    const minT = reducedMotion ? 1 : Math.min(1, (performance.now() - t0) / 1600);
-    const goal = Math.min(target, minT * 100);
-    shown += (goal - shown) * 0.12;
-    if (goal - shown < 0.4) shown = goal;
-    pct.textContent = Math.round(shown);
-    bar.style.setProperty('--p', shown / 100);
-    msg.textContent = msgs[Math.min(msgs.length - 1, Math.floor((shown / 100) * (msgs.length - 1)))];
-    if (shown < 100) raf = requestAnimationFrame(tick);
-    else finish();
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / ms);
+    const n = Math.floor(k * target.length);
+    el.textContent = target.slice(0, n) + [...target.slice(n)].map((c) => (c === ' ' ? ' ' : GLYPHS[(Math.random() * GLYPHS.length) | 0])).join('');
+    if (k < 1) requestAnimationFrame(step);
   };
-  let done = false, onDone = null;
-  const finish = () => {
-    if (done) return;
-    done = true;
-    cancelAnimationFrame(raf);
-    setTimeout(() => {
-      el.classList.add('done');
-      document.body.classList.remove('locked');
-      sfx.whoosh();
-      onDone?.();
-      setTimeout(() => el.remove(), 1200);
-    }, reducedMotion ? 0 : 250);
-  };
-  raf = requestAnimationFrame(tick);
-  return { set: (p) => (target = Math.max(target, p)), then: (fn) => { if (done) fn(); else onDone = fn; } };
+  requestAnimationFrame(step);
 }
 
-function preload(urls, onProgress) {
-  let n = 0;
-  const step = () => onProgress(++n / urls.length);
-  return Promise.all(urls.map((u) => new Promise((res) => {
-    const i = new Image();
-    i.onload = i.onerror = () => { step(); res(); };
-    i.src = u;
-  })));
-}
+start();
 
+let toast = () => {};
 async function start() {
-  try { DATA = await loadAll(); } catch (err) { loader.set(100); loadFailed(err); return; }
+  let data;
+  try { data = await loadAll(); } catch (err) { loader.set(100); loadFailed(err); return; }
+  titles = ['FEWCLICKS', ...data.games.map((g) => g.title)];
   loader.set(20);
-  const featured = DATA.games.filter((g) => g.featured);
-  const heroGames = (featured.length ? featured : DATA.games).slice(0, 4);
-  render(heroGames);
-  loader.then(() => {
-    $('.hero').classList.add('in');
-    startSlides(heroGames);
-    routeFromHash();
+  render(data);
+  const panel = $('[data-panel]');
+  const router = gameRouter({
+    panel, games: data.games, studio: data.studio, homeTitle: HOME_TITLE,
+    render: panelHtml,
+    notFound: (id) => html`<div class="panel-bar"><a class="brand" href="#games"><b></b>FewClicks</a><button class="round" type="button" data-close-panel aria-label="Close">✕</button></div><div class="not-found" data-not-found><div><span class="mono">Error 404</span><h2>Out of focus.</h2><p class="mono" style="margin-bottom:24px">No game called “${id}”.</p><button class="cta" type="button" data-close-panel><span class="dot"></span>Back to games</button></div></div>`,
+    afterRender: (p, g) => {
+      if (g) bindLightbox($('#lightbox'), g, { root: p });
+      p.querySelectorAll('a[data-store][href="#"]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); toast('Store page coming soon'); }));
+    },
+    onOpen: () => sfx.whoosh(),
   });
-  const fonts = document.fonts?.ready || Promise.resolve();
-  await Promise.race([
-    Promise.all([fonts, preload(heroGames.map((g) => g.media.hero), (p) => loader.set(20 + p * 79))]),
-    new Promise((r) => setTimeout(r, 6000)),
-  ]);
+  loader.then(() => router.route());
+  await preloadAll(data.games.map((g) => g.media.cover), (p) => loader.set(20 + p * 79));
   loader.set(100);
 }
 
+// remember where the user clicked so the panel wipes open from there
+addEventListener('pointerdown', (e) => {
+  const p = $('[data-panel]');
+  if (p && !p.classList.contains('open')) { p.style.setProperty('--ox', `${e.clientX}px`); p.style.setProperty('--oy', `${e.clientY}px`); }
+}, true);
+
 // ---------------- page ----------------
-function render(heroGames) {
-  const { games, categories, studio, team, news } = DATA;
-  const spot = heroGames[0];
-  const words = (studio.description || '').split(/\s+/);
+function render(data) {
+  const { games, categories, studio, team, news } = data;
+  const cols = innerWidth < 720 ? 3 : 6;
+  const pool = [...games, ...games, ...games];
+  const wall = Array.from({ length: cols }, (_, c) => {
+    const imgs = Array.from({ length: 5 }, (_, k) => pool[(c * 2 + k) % pool.length].media.cover);
+    const all = [...imgs, ...imgs];
+    return `<div class="col" style="--dur:${38 + (c % 3) * 9}s">${all.map((s) => `<img src="${s}" alt="" loading="eager">`).join('')}</div>`;
+  }).join('');
 
   main.insertAdjacentHTML('beforebegin', `<nav class="nav" aria-label="Main" data-nav>
-    <a class="brand" href="#top">${LOGO}FewClicks</a>
-    <ul><li><a href="#games">Games</a></li><li><a href="#studio">Studio</a></li><li><a href="#news">News</a></li><li><a href="#contact">Contact</a></li></ul>
-    <div class="nav-right"><button class="icon-btn" type="button" data-sound-toggle><span data-sound-icon></span></button><a class="pill pill--solid" href="#contact">Get in touch <span class="arr">→</span></a>
-    <button class="icon-btn menu-btn" type="button" aria-label="Menu" aria-expanded="false" data-menu>☰</button></div></nav>`);
+    <a class="brand" href="#top"><b aria-hidden="true"></b>FewClicks</a>
+    <ul><li><a href="#games">Games</a></li><li><a href="#studio">Studio</a></li><li><a href="#news">Journal</a></li><li><a href="#contact">Contact</a></li></ul>
+    <div class="right"><button class="txt-btn" type="button" data-sound-toggle><span data-sound-icon></span></button><button class="txt-btn menu-btn" type="button" aria-expanded="false" data-menu>Menu</button></div></nav>`);
 
   main.innerHTML = html`
-  <section class="hero" id="top" aria-label="Introduction">
-    <div class="slides" aria-hidden="true">${heroGames.map((g, i) => raw(html`<div class="slide ${i ? '' : 'on'}"><img src="${g.media.hero}" alt=""></div>`))}</div>
-    <div class="hero-content">
-      <p class="hero-kicker mono">Independent game studio · Est. ${studio.founded || '2026'}</p>
-      <h1 aria-label="${studio.tagline}"><span class="line"><span>Games you</span></span><span class="line"><span>can <em>love</em> in</span></span><span class="line"><span>a few clicks.</span></span></h1>
-      <div class="hero-row">
-        <p class="hero-lead">We craft bright, tactile games for phones, PCs and consoles: instantly playable, endlessly replayable.</p>
-        <div class="now" aria-live="polite">
-          <div class="now-title"><span class="mono">Now showing</span><a class="pill" href="#game/${spot.id}" data-now>${spot.title} <span class="arr">→</span></a></div>
-          <div class="dots" role="tablist" aria-label="Featured games">${heroGames.map((g, i) => raw(html`<button type="button" role="tab" aria-label="${g.title}" aria-selected="${i === 0}" data-dot="${i}"><i></i></button>`))}</div>
-        </div>
-      </div>
+  <section class="hero" id="top" aria-label="FewClicks" data-hero>
+    <div class="layer gray" aria-hidden="true"><div class="wall" style="--cols:${cols}">${raw(wall)}</div><div class="bigword">FewClicks</div></div>
+    <div class="layer color" aria-hidden="true" data-lens><div class="wall" style="--cols:${cols}">${raw(wall)}</div><div class="bigword">FewClicks</div></div>
+    <span class="lens-ring" aria-hidden="true" data-ring></span>
+    <div class="hero-top"><span class="mono">Independent game studio</span><span class="mono">Est. ${studio.founded || '2026'} · Mobile · PC · Console</span></div>
+    <h1 class="sr-only">FewClicks. ${studio.tagline}</h1>
+    <div class="hero-foot">
+      <p class="tag">${studio.tagline}</p>
+      <span class="mono mid">${coarsePointer ? 'Touch to focus' : 'Move to focus the lens'}</span>
+      <div class="right"><a class="cta" href="#games" data-magnet><span class="dot"></span>Explore the games</a></div>
     </div>
-    <span class="scroll-cue mono" aria-hidden="true">Scroll</span>
   </section>
 
-  <section class="section container" aria-labelledby="about-t">
-    <div class="sec-head"><span class="mono" id="about-t">(01) About</span>
-      <p class="statement" data-statement>${words.map((w) => raw(html`<span class="w">${w}</span> `))}</p></div>
-    <div class="stats">${studio.stats.map((s) => raw(html`<div class="stat" data-reveal><b data-count="${s.value}">${s.value}</b><span>${s.label}</span></div>`))}</div>
-  </section>
-
-  <section class="section container" id="games" aria-labelledby="games-t">
-    <div class="sec-head"><span class="mono">(02) Portfolio</span><h2 id="games-t">Selected <span class="dim">games</span></h2></div>
-    <div class="toolbar" role="search">
-      <div class="filters" role="group" aria-label="Category">${[{ id: 'all', name: 'All' }, ...categories].map((c) => raw(html`<button class="fbtn" type="button" data-cat="${c.id}" aria-pressed="${c.id === 'all'}">${c.name}<sup>${c.id === 'all' ? games.length : games.filter((g) => g.categories.includes(c.id)).length}</sup></button>`))}</div>
-      <div class="tools-right">
-        <div class="filters" role="group" aria-label="Platform">${[['all', 'Any'], ['mobile', 'Mobile'], ['pc', 'PC'], ['console', 'Console']].map(([k, l]) => raw(html`<button class="fbtn" type="button" data-platform="${k}" aria-pressed="${k === 'all'}">${l}</button>`))}</div>
-        <label class="sr-only" for="q">Search games</label><input class="search" id="q" type="search" placeholder="Search…" data-q autocomplete="off">
-        <label class="sr-only" for="sort">Sort</label><select class="select" id="sort" data-sort><option value="featured">Featured</option><option value="newest">Newest</option><option value="rating">Top rated</option><option value="az">A–Z</option></select>
+  <section class="section" id="games" aria-labelledby="games-t">
+    <div class="s-label"><span class="mono">(01) Portfolio</span><span class="mono">${games.length} projects</span></div>
+    <h2 class="s-title" id="games-t">Our <span class="o">games</span></h2>
+    <div class="g-bar" role="search">
+      <div class="chips" role="group" aria-label="Category">${[{ id: 'all', name: 'All' }, ...categories].map((c) => raw(html`<button class="chip" type="button" data-cat="${c.id}" aria-pressed="${c.id === 'all'}">${c.name}</button>`))}</div>
+      <div class="g-tools">
+        <div class="chips" role="group" aria-label="Platform">${[['all', 'Any'], ['mobile', 'Mobile'], ['pc', 'PC'], ['console', 'Console']].map(([k, l]) => raw(html`<button class="chip" type="button" data-platform="${k}" aria-pressed="${k === 'all'}">${l}</button>`))}</div>
+        <label class="sr-only" for="q">Search</label><input class="field" id="q" type="search" placeholder="Search…" data-q autocomplete="off">
+        <label class="sr-only" for="sort">Sort</label><select class="field" id="sort" data-sort><option value="featured">Featured</option><option value="newest">Newest</option><option value="rating">Top rated</option><option value="az">A–Z</option></select>
+        <div class="chips" role="group" aria-label="View"><button class="chip" type="button" data-view="canvas" aria-pressed="true">Canvas</button><button class="chip" type="button" data-view="list" aria-pressed="false">Index</button></div>
       </div>
     </div>
     <p class="sr-only" aria-live="polite" data-status></p>
-    <ul class="games" data-grid></ul>
-    <p class="empty" data-empty hidden>No games match those filters. <button class="pill" type="button" data-reset>Reset</button></p>
-    ${spot ? raw(html`<article class="feature" data-reveal>
-      <div class="feature-art"><img src="${spot.media.hero}" alt="${spot.title} artwork" loading="lazy"></div>
-      <div class="feature-body"><span class="mono">Featured · ${STATUS[spot.status].label}</span><h3>${spot.title}</h3><p>${spot.description.short}</p>
-        <div><a class="pill pill--solid" href="#game/${spot.id}">View project <span class="arr">→</span></a></div></div></article>`) : ''}
+    <div data-grid></div>
+    <p class="empty" data-empty hidden>Nothing in focus. <button class="chip" type="button" data-reset>Reset filters</button></p>
   </section>
 
-  <section class="section container" id="studio" aria-labelledby="studio-t">
-    <div class="sec-head"><span class="mono">(03) Studio</span><h2 id="studio-t">Small team. <span class="dim">Big worlds.</span></h2></div>
-    <div class="studio-grid">
-      <p class="statement" style="font-size:clamp(22px,2.4vw,34px);color:var(--muted)">${studio.description}</p>
-      <ul class="values">${studio.values.map((v) => raw(html`<li data-reveal><div><h3>${v.title}</h3><p>${v.text}</p></div></li>`))}</ul>
+  <section class="section" id="studio" aria-labelledby="studio-t">
+    <div class="s-label"><span class="mono">(02) Studio</span><span class="mono">Manifesto</span></div>
+    <p class="intro-text" data-reveal id="studio-t">${studio.description}</p>
+    <div class="manifesto">
+      <div class="sticky-num" aria-hidden="true"><span data-mnum>01</span><small>/ ${String(studio.values.length).padStart(2, '0')} principles</small></div>
+      <div>${studio.values.map((v, i) => raw(html`<article class="m-item" data-m="${i + 1}"><span class="mono">Principle ${String(i + 1).padStart(2, '0')}</span><h3>${v.title}</h3><p>${v.text}</p></article>`))}</div>
     </div>
-    <div class="team">${team.map((m) => raw(html`<article class="member" data-team-member data-reveal><div class="ph" style="background:${m.color}"><img src="${m.avatar}" alt="" loading="lazy" width="256" height="256"></div><div><h3>${m.name}</h3><span class="role">${m.role}</span></div><p>${m.bio}</p></article>`))}</div>
+    <div class="stats">${studio.stats.map((s) => raw(html`<div class="stat" data-reveal><b>${s.value}</b><span class="mono">${s.label}</span></div>`))}</div>
+    <div class="team">${team.map((m) => raw(html`<article class="member" data-team-member><div class="ph" style="background:${m.color}"><img src="${m.avatar}" alt="" loading="lazy" width="256" height="256"></div><span class="mono">${m.role}</span><h3>${m.name}</h3><p>${m.bio}</p></article>`))}</div>
   </section>
 
-  <section class="section container" id="news" aria-labelledby="news-t">
-    <div class="sec-head"><span class="mono">(04) Journal</span><h2 id="news-t">News &amp; <span class="dim">devlog</span></h2></div>
-    <div class="news">${news.map((p) => raw(html`<button class="news-item" type="button" data-news-item data-id="${p.id}"><span class="mono">${formatDate(p.date)}</span><span><h3>${p.title}</h3><p>${p.summary}</p></span><span class="mono tagm">${p.tag}</span><span class="arr" aria-hidden="true">↗</span></button>`))}</div>
+  <section class="section" id="news" aria-labelledby="news-t">
+    <div class="s-label"><span class="mono">(03) Journal</span><span class="mono">Devlog &amp; news</span></div>
+    <h2 class="s-title" id="news-t" style="margin-bottom:50px">Jour<span class="o">nal</span></h2>
+    <div>${news.map((p) => raw(html`<button class="news-item" type="button" data-news-item data-id="${p.id}"><span class="mono">${formatDate(p.date)}</span><span><h3>${p.title}</h3><p>${p.summary}</p></span><span class="mono">${p.tag} ↗</span></button>`))}</div>
   </section>
 
-  <section class="section container contact" id="contact" aria-labelledby="contact-t">
-    <div class="sec-head"><span class="mono">(05) Contact</span><h2 id="contact-t">Let's make <span class="dim">something fun.</span></h2></div>
-    <a class="big-mail" data-email-link href="mailto:${studio.email || 'admin@fewclicks.org'}">${studio.email || 'admin@fewclicks.org'} <span class="ar" aria-hidden="true">↗</span></a>
-    <div class="contact-row"><a class="pill pill--solid" data-email-link href="mailto:admin@fewclicks.org">Write to us <span class="arr">→</span></a><button class="pill" type="button" data-copy-email>Copy address</button>
-      ${studio.socials.map((s) => raw(html`<a class="pill" href="${s.url}" target="_blank" rel="noopener">${s.label}</a>`))}
-      ${studio.address ? raw(html`<address>${studio.address}</address>`) : ''}</div>
+  <section class="section contact" id="contact" aria-labelledby="contact-t">
+    <div class="s-label"><span class="mono">(04) Contact</span><span class="mono">Say hello</span></div>
+    <h2 class="sr-only" id="contact-t">Contact</h2>
+    <a class="mail-big" data-email-link="text" href="mailto:admin@fewclicks.org">admin@fewclicks.org</a>
+    <div class="c-row"><a class="cta" data-email-link data-magnet href="mailto:admin@fewclicks.org"><span class="dot"></span>Write to us</a><button class="cta cta--ghost" type="button" data-copy-email><span class="dot"></span>Copy address</button>${studio.address ? raw(html`<address>${studio.address}</address>`) : ''}</div>
   </section>
-  <footer class="footer"><span>© ${new Date().getFullYear()} ${studio.legalName || 'FewClicks'}. All rights reserved.</span><span><a href="#games">Games</a> · <a href="#studio">Studio</a> · <a href="#news">News</a> · <a href="mailto:admin@fewclicks.org">admin@fewclicks.org</a></span></footer>
-  <div class="preview" aria-hidden="true" data-preview></div>
-  <div class="panel" role="dialog" aria-modal="true" aria-label="Game details" data-panel></div>
-  <dialog class="modal" id="news-modal" aria-labelledby="nm-t"><button class="icon-btn modal-x" type="button" data-close aria-label="Close">✕</button><div class="modal-body" data-modal-body></div></dialog>
-  <dialog class="lightbox" id="lightbox" aria-label="Screenshot viewer"><img src="" alt="" data-lb-img><nav><button class="pill" type="button" data-lb-prev>← Prev</button><button class="pill pill--solid" type="button" data-lb-close>Close</button><button class="pill" type="button" data-lb-next>Next →</button></nav></dialog>
+  <footer class="footer"><span class="mono">© ${new Date().getFullYear()} ${studio.legalName || 'FewClicks'}</span><span class="mono">Designed to be played in a few clicks</span></footer>
+  <div class="panel" role="dialog" aria-modal="true" aria-label="Game details" aria-hidden="true" data-panel></div>
+  <dialog class="modal" id="news-modal" aria-labelledby="nm-t"><button class="round modal-x" type="button" data-close aria-label="Close">✕</button><div class="modal-body" data-modal-body></div></dialog>
+  <dialog class="lightbox" id="lightbox" aria-label="Screenshot viewer"><img src="" alt="" data-lb-img><nav><button class="cta cta--ghost" type="button" data-lb-prev>← Prev</button><button class="cta" type="button" data-lb-close>Close</button><button class="cta cta--ghost" type="button" data-lb-next>Next →</button></nav></dialog>
   <div class="toast" role="status" aria-live="polite" data-toast></div>`;
 
-  // nav
-  const nav = $('[data-nav]');
-  const onScroll = () => nav.classList.toggle('solid', scrollY > 40);
-  addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
-  const mb = $('[data-menu]');
-  mb.addEventListener('click', () => { const o = nav.classList.toggle('menu-open'); mb.setAttribute('aria-expanded', String(o)); mb.textContent = o ? '✕' : '☰'; });
-  nav.querySelectorAll('ul a').forEach((a) => a.addEventListener('click', () => { nav.classList.remove('menu-open'); mb.textContent = '☰'; }));
-  const secs = ['games', 'studio', 'news', 'contact'].map((id) => document.getElementById(id));
-  if ('IntersectionObserver' in window) {
-    const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) nav.querySelectorAll('ul a').forEach((a) => a.classList.toggle('active', a.getAttribute('href') === `#${e.target.id}`)); }), { rootMargin: '-45% 0px -50% 0px' });
-    secs.forEach((s) => io.observe(s));
-  }
-  mountSoundToggle($('[data-sound-toggle]'), { on: '♪', off: '♪̸' });
-  mountPrototypeBadge(6, 'Studio Portfolio');
+  toast = toaster($('[data-toast]'));
+  mountSoundToggle($('[data-sound-toggle]'), { on: 'Sound on', off: 'Sound off' });
+  mountPrototypeBadge(6, 'Studio Portfolio · Lens');
+  const nav = $('[data-nav]'), mb = $('[data-menu]');
+  mb.addEventListener('click', () => { const o = nav.classList.toggle('menu-open'); mb.setAttribute('aria-expanded', String(o)); mb.textContent = o ? 'Close' : 'Menu'; });
+  nav.querySelectorAll('ul a').forEach((a) => {
+    a.addEventListener('click', () => { nav.classList.remove('menu-open'); mb.textContent = 'Menu'; });
+    a.addEventListener('mouseenter', () => scramble(a, a.textContent, 300));
+  });
 
-  // statement highlights word by word as you scroll
-  const ws = [...main.querySelectorAll('[data-statement] .w')];
-  const lit = () => {
-    const st = $('[data-statement]').getBoundingClientRect();
-    const p = Math.min(1, Math.max(0, (innerHeight * 0.85 - st.top) / (st.height + innerHeight * 0.35)));
-    const n = reducedMotion ? ws.length : Math.round(p * ws.length);
-    ws.forEach((w, i) => w.classList.toggle('lit', i < n));
-  };
-  addEventListener('scroll', lit, { passive: true });
-  lit();
-
-  renderList();
-  bindNews();
-  bindEmailCopy(studio.email || 'admin@fewclicks.org', (ok) => toast(ok ? 'Email address copied' : 'Copy failed'));
+  setupLens();
+  setupGames(games, categories);
+  setupManifesto();
+  setupMagnets();
+  bindNews(data);
+  bindEmailCopy(studio.email || 'admin@fewclicks.org', (ok) => { toast(ok ? 'Email copied' : 'Copy failed'); if (ok) sfx.success(); });
   reveal(main, reducedMotion);
-  addEventListener('hashchange', routeFromHash);
 }
 
-// ---------------- hero slideshow ----------------
-function startSlides(games) {
-  const slides = [...document.querySelectorAll('.slide')];
-  const dots = [...document.querySelectorAll('[data-dot]')];
-  const now = $('[data-now]');
-  let i = 0, timer;
-  const DUR = 6000;
-  const go = (n) => {
-    i = (n + slides.length) % slides.length;
-    slides.forEach((s, k) => s.classList.toggle('on', k === i));
-    dots.forEach((d, k) => {
-      d.classList.toggle('on', k === i);
-      d.classList.toggle('past', k < i);
-      d.setAttribute('aria-selected', String(k === i));
-      d.style.setProperty('--dur', `${DUR}ms`);
-      const bar = d.querySelector('i'); bar.style.animation = 'none'; void bar.offsetWidth; bar.style.animation = '';
-    });
-    now.firstChild.textContent = `${games[i].title} `;
-    now.href = `#game/${games[i].id}`;
-    clearTimeout(timer);
-    if (!reducedMotion) timer = setTimeout(() => go(i + 1), DUR);
+// ---------------- lens ----------------
+function setupLens() {
+  const hero = $('[data-hero]'), lens = $('[data-lens]'), ring = $('[data-ring]');
+  let x = innerWidth / 2, y = innerHeight / 2, cx = x, cy = y, r = 0, tr = coarsePointer ? 120 : 0, inside = false;
+  const R = () => Math.min(220, Math.max(120, innerWidth * 0.14));
+  hero.addEventListener('pointermove', (e) => { const b = hero.getBoundingClientRect(); x = e.clientX - b.left; y = e.clientY - b.top; inside = true; tr = R(); });
+  hero.addEventListener('pointerleave', () => { inside = false; tr = 0; });
+  hero.addEventListener('pointerdown', () => { tr = R() * 1.5; sfx.pop(0.6); });
+  hero.addEventListener('pointerup', () => { tr = inside ? R() : 0; });
+  let t = 0;
+  const loop = () => {
+    t += 0.008;
+    if (!inside) {
+      // idle: the lens wanders on its own (and always on touch screens)
+      const b = hero.getBoundingClientRect();
+      x = b.width * (0.5 + 0.32 * Math.sin(t * 1.3));
+      y = b.height * (0.45 + 0.18 * Math.sin(t * 2.1));
+      tr = reducedMotion ? 0 : R() * 0.8;
+    }
+    cx += (x - cx) * 0.14; cy += (y - cy) * 0.14; r += (tr - r) * 0.1;
+    for (const el of [lens, ring]) { el.style.setProperty('--lx', `${cx}px`); el.style.setProperty('--ly', `${cy}px`); el.style.setProperty('--r', `${r}px`); }
+    requestAnimationFrame(loop);
   };
-  dots.forEach((d) => d.addEventListener('click', () => { go(Number(d.dataset.dot)); sfx.tick(); }));
-  go(0);
+  if (!reducedMotion) loop();
 }
 
-// ---------------- games list ----------------
-function renderList() {
-  const { games } = DATA;
+// ---------------- games: infinite canvas + index ----------------
+function setupGames(games, categories) {
+  const host = $('[data-grid]');
   const state = { category: 'all', platform: 'all', query: '', sort: 'featured' };
-  const grid = $('[data-grid]');
+  let view = 'canvas', board = null;
+
   const draw = (animate) => {
     const list = filterGames(games, state);
-    grid.innerHTML = list.map((g, i) => html`<li><button class="game-row" type="button" data-game-card data-open="${g.id}" style="--c1:${g.theme.primary}">
-      <span class="thumb"><img src="${g.media.cover}" alt="" loading="lazy"></span>
-      <span class="idx">${String(i + 1).padStart(2, '0')}</span>
-      <h3>${g.title}${g.status !== 'released' ? raw(html`<span class="badge">${STATUS[g.status].short}</span>`) : ''}</h3>
-      <span class="cats">${g.categoryList.map((c) => c.name).join(' / ')}</span>
-      <span class="plat">${[...new Set(g.platformList.map((p) => p.group))].join(' · ')}</span>
-      <span class="yr">${year(g.releaseDate)}</span>
-      <span class="arr" aria-hidden="true">→</span></button></li>`).join('');
     $('[data-empty]').hidden = list.length > 0;
     $('[data-status]').textContent = `${list.length} games shown`;
-    if (animate && !reducedMotion) grid.querySelectorAll('li').forEach((li, k) => li.animate([{ opacity: 0, transform: 'translateY(20px)' }, { opacity: 1, transform: 'none' }], { duration: 600, delay: k * 50, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'backwards' }));
+    board?.destroy();
+    board = null;
+    if (!list.length) { host.innerHTML = ''; return; }
+    if (view === 'list') {
+      host.innerHTML = `<div class="list">${list.map((g, i) => html`<button class="row" type="button" data-game-card data-open="${g.id}"><span class="mono">${String(i + 1).padStart(2, '0')}</span><h3>${g.title}</h3><span class="mono cats">${g.categoryList.map((c) => c.name).join(' / ')}</span><span class="mono plat">${[...new Set(g.platformList.map((p) => p.group))].join(' · ')}</span><span class="mono yr">${year(g.releaseDate)}</span></button>`).join('')}</div>`;
+      if (animate && !reducedMotion) host.querySelectorAll('.row').forEach((r, i) => r.animate([{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 600, delay: i * 50, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'backwards' }));
+    } else {
+      board = infiniteBoard(host, list);
+    }
   };
   const sync = () => {
     document.querySelectorAll('#games [data-cat]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.cat === state.category)));
     document.querySelectorAll('#games [data-platform]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.platform === state.platform)));
+    document.querySelectorAll('#games [data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
   };
-  const sec = $('#games');
-  sec.addEventListener('click', (e) => {
-    const c = e.target.closest('[data-cat]'), p = e.target.closest('[data-platform]'), r = e.target.closest('[data-reset]');
+  $('#games').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-cat]'), p = e.target.closest('[data-platform]'), v = e.target.closest('[data-view]'), r = e.target.closest('[data-reset]');
     if (c) state.category = c.dataset.cat;
     else if (p) state.platform = p.dataset.platform;
+    else if (v) view = v.dataset.view;
     else if (r) { Object.assign(state, { category: 'all', platform: 'all', query: '', sort: 'featured' }); $('[data-q]').value = ''; $('[data-sort]').value = 'featured'; }
     else return;
     sync(); draw(true); sfx.tick();
   });
   let t;
-  $('[data-q]').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { state.query = e.target.value; draw(true); }, 150); });
+  $('[data-q]').addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { state.query = e.target.value; draw(true); }, 160); });
   $('[data-sort]').addEventListener('change', (e) => { state.sort = e.target.value; draw(true); });
-  grid.addEventListener('click', (e) => { const b = e.target.closest('[data-open]'); if (b) location.hash = `game/${b.dataset.open}`; });
+  host.addEventListener('click', (e) => {
+    if (board?.dragged()) return;
+    const b = e.target.closest('[data-open]');
+    if (b) location.hash = `game/${b.dataset.open}`;
+  });
   draw(false);
+}
 
-  // floating cover preview that follows the cursor
-  if (!coarsePointer && !reducedMotion) {
-    const pv = $('[data-preview]');
-    let x = 0, y = 0, cx = 0, cy = 0, cur = '';
-    grid.addEventListener('pointermove', (e) => {
-      x = e.clientX; y = e.clientY;
-      const row = e.target.closest('[data-open]');
-      if (!row) { pv.classList.remove('on'); cur = ''; return; }
-      if (row.dataset.open !== cur) {
-        cur = row.dataset.open;
-        const g = games.find((v) => v.id === cur);
-        pv.insertAdjacentHTML('beforeend', `<img src="${g.media.cover}" alt="">`);
-        const imgs = pv.querySelectorAll('img');
-        imgs[imgs.length - 1].animate([{ clipPath: 'inset(100% 0 0 0)' }, { clipPath: 'inset(0 0 0 0)' }], { duration: 500, easing: 'cubic-bezier(.22,1,.36,1)' });
-        if (imgs.length > 3) imgs[0].remove();
-        sfx.blip();
-      }
-      pv.classList.add('on');
-    });
-    grid.addEventListener('pointerleave', () => { pv.classList.remove('on'); cur = ''; });
-    const loop = () => { cx += (x - cx) * 0.14; cy += (y - cy) * 0.14; pv.style.left = `${cx + 200}px`; pv.style.top = `${cy}px`; requestAnimationFrame(loop); };
-    loop();
+function infiniteBoard(host, list) {
+  host.innerHTML = `<div class="board" data-board><span class="hint mono">${coarsePointer ? 'Swipe sideways to explore' : 'Drag to explore · click to open'}</span></div>`;
+  const el = $('[data-board]', host);
+  const tw = innerWidth < 720 ? 210 : 300, th = tw * 0.625 + 44, gap = innerWidth < 720 ? 20 : 34;
+  el.style.setProperty('--tw', `${tw}px`);
+  const cw = tw + gap, ch = th + gap;
+  const need = Math.ceil((el.clientWidth + cw * 2) / cw);
+  const C = Math.max(1, Math.ceil(need / list.length)) * list.length;
+  const R = Math.max(2, Math.ceil((el.clientHeight + ch * 2) / ch));
+  const PW = C * cw, PH = R * ch;
+  const tiles = [];
+  const seen = new Set();
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+    const g = list[(c + r * Math.max(1, Math.floor(list.length / 2))) % list.length];
+    const first = !seen.has(g.id);
+    seen.add(g.id);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tile';
+    b.dataset.open = g.id;
+    if (first) b.setAttribute('data-game-card', ''); else { b.tabIndex = -1; b.setAttribute('aria-hidden', 'true'); }
+    b.setAttribute('aria-label', `Open ${g.title}`);
+    b.innerHTML = html`<span class="im"><img src="${g.media.cover}" alt="" draggable="false"></span>${g.status !== 'released' ? raw(html`<span class="st mono">${STATUS[g.status].short}</span>`) : ''}<span class="cap"><b>${g.title}</b><span class="mono">${year(g.releaseDate)}</span></span>`;
+    el.appendChild(b);
+    tiles.push({ b, bx: c * cw + (r % 2 ? cw / 2 : 0), by: r * ch });
   }
+  let ox = -cw * 0.4, oy = -ch * 0.3, vx = reducedMotion ? 0 : -0.35, vy = 0, drag = null, moved = 0, raf, alive = true;
+  const mod = (a, n) => ((a % n) + n) % n;
+  const place = () => {
+    for (const t of tiles) {
+      const x = mod(t.bx + ox, PW) - cw;
+      const y = mod(t.by + oy, PH) - ch;
+      t.b.style.transform = `translate(${x}px, ${y}px)`;
+    }
+  };
+  el.addEventListener('pointerdown', (e) => {
+    drag = { x: e.clientX, y: e.clientY, id: e.pointerId, touch: e.pointerType === 'touch' };
+    moved = 0;
+    el.classList.add('dragging');
+  });
+  addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x, dy = drag.touch ? 0 : e.clientY - drag.y;
+    drag.x = e.clientX; drag.y = e.clientY;
+    moved += Math.abs(dx) + Math.abs(dy);
+    ox += dx; oy += dy; vx = dx; vy = dy;
+  });
+  const up = () => { if (!drag) return; drag = null; el.classList.remove('dragging'); };
+  addEventListener('pointerup', up);
+  addEventListener('pointercancel', up);
+  el.addEventListener('wheel', (e) => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) { e.preventDefault(); ox -= e.deltaX; vx = -e.deltaX * 0.2; } }, { passive: false });
+  el.addEventListener('keydown', (e) => {
+    const k = { ArrowLeft: [cw, 0], ArrowRight: [-cw, 0], ArrowUp: [0, ch], ArrowDown: [0, -ch] }[e.key];
+    if (k && e.target === el) { e.preventDefault(); ox += k[0]; oy += k[1]; }
+  });
+  const loop = () => {
+    if (!alive) return;
+    raf = requestAnimationFrame(loop);
+    if (!drag) {
+      ox += vx; oy += vy;
+      vx *= 0.94; vy *= 0.94;
+      if (!reducedMotion && Math.abs(vx) < 0.35 && Math.abs(vy) < 0.1) vx = -0.35; // gentle idle drift
+    }
+    place();
+  };
+  place();
+  loop();
+  return {
+    dragged: () => moved > 6,
+    destroy() { alive = false; cancelAnimationFrame(raf); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); },
+  };
+}
+
+// ---------------- manifesto + magnets ----------------
+function setupManifesto() {
+  const num = $('[data-mnum]');
+  if (!('IntersectionObserver' in window)) return;
+  const io = new IntersectionObserver((es) => es.forEach((e) => {
+    if (e.isIntersecting) { const v = String(e.target.dataset.m).padStart(2, '0'); if (num.textContent !== v) { scramble(num, v, 300); sfx.tick(); } }
+  }), { rootMargin: '-45% 0px -45% 0px' });
+  document.querySelectorAll('[data-m]').forEach((m) => io.observe(m));
+}
+
+function setupMagnets() {
+  if (coarsePointer || reducedMotion) return;
+  document.querySelectorAll('[data-magnet]').forEach((b) => {
+    b.addEventListener('pointermove', (e) => {
+      const r = b.getBoundingClientRect();
+      b.style.transform = `translate(${(e.clientX - r.left - r.width / 2) * 0.3}px, ${(e.clientY - r.top - r.height / 2) * 0.4}px)`;
+    });
+    b.addEventListener('pointerleave', () => (b.style.transform = ''));
+  });
 }
 
 // ---------------- game panel ----------------
-let lastFocus = null;
-function routeFromHash() {
-  const m = location.hash.match(/^#game\/(.+)$/);
-  if (m) openGame(decodeURIComponent(m[1]));
-  else closePanel(false);
+function panelHtml(g, { index, prev, next, games }) {
+  const verb = g.status === 'released' ? 'Get it on' : 'Wishlist on';
+  const meta = [['Platforms', g.platformList.map((p) => p.label).join(', ')], ['Release', g.status === 'released' ? formatDate(g.releaseDate) : `${formatDate(g.releaseDate)} · planned`], ['Genre', g.categoryList.map((c) => c.name).join(', ')], ['Price', g.price || '—']];
+  return html`
+  <div class="panel-bar"><a class="brand" href="#games"><b></b>FewClicks</a><span class="mono">${String(index + 1).padStart(2, '0')} / ${String(games.length).padStart(2, '0')}</span>
+    <div class="navs"><button class="round" type="button" data-go="${prev.id}" aria-label="Previous game">←</button><button class="round" type="button" data-go="${next.id}" aria-label="Next game">→</button><button class="round" type="button" data-close-panel aria-label="Close">✕</button></div></div>
+  <header class="p-hero"><img src="${g.media.hero}" alt="${g.title} artwork">
+    <div class="p-hero-c"><span class="mono lime">${STATUS[g.status].label} · ${g.categoryList.map((c) => c.name).join(' / ')}</span><h2 data-game-title>${g.title}</h2><p class="tagl">${g.tagline}</p></div></header>
+  <div class="p-wrap">
+    <div class="meta-grid">${meta.map(([k, v]) => raw(html`<div><span class="mono">${k}</span><b>${v}</b></div>`))}</div>
+    <div class="p-body">
+      <div><p class="lead">${g.description.short}</p><div class="prose">${g.description.long.map((p) => raw(html`<p>${p}</p>`))}</div>
+        <div class="stores">${g.stores.map((s, i) => raw(html`<a class="cta ${i ? 'cta--ghost' : ''}" data-store href="${s.url || '#'}"${s.url && s.url !== '#' ? raw(' target="_blank" rel="noopener"') : ''}><span class="dot"></span>${s.label || `${verb} ${storeLabel(s)}`}</a>`))}${g.stores.length ? '' : raw('<span class="cta cta--ghost"><span class="dot"></span>Coming soon</span>')}</div></div>
+      <div>${g.features.length ? raw(html`<h3 class="mono" style="font-weight:400;margin-bottom:14px">Highlights</h3><ul class="feat-list">${g.features.map((f, i) => raw(html`<li><span>0${i + 1}</span>${f}</li>`))}</ul>`) : ''}
+        ${g.rating.count ? raw(html`<p style="margin-top:30px"><span class="mono">Player rating</span><br><span style="font-family:var(--display);font-size:72px;font-weight:300;letter-spacing:-.06em">${g.rating.average.toFixed(1)}</span> <span class="lime">${starString(g.rating.average)}</span> <span class="mono">${compactNumber(g.rating.count)} ratings</span></p>`) : ''}</div>
+    </div>
+    <section class="p-sec"><h3>Trailer</h3><div class="media">${g.hasTrailer ? raw(trailerHtml(g)) : raw(html`<div class="none"><img src="${g.media.cover}" alt=""><span class="mono" style="color:var(--bone)">Trailer coming soon</span></div>`)}</div></section>
+    ${g.media.screenshots.length ? raw(html`<section class="p-sec"><h3>Gallery</h3><div class="gallery">${g.media.screenshots.map((s, i) => raw(html`<button type="button" data-shot="${i}" aria-label="Open screenshot ${i + 1}"><img src="${s}" alt="${g.title} screenshot ${i + 1}" loading="lazy"></button>`))}</div></section>`) : ''}
+    ${g.reviews.length ? raw(html`<section class="p-sec"><h3>Press &amp; players</h3><div class="quotes">${g.reviews.map((r) => raw(html`<figure class="quote">${typeof r.score === 'number' ? raw(html`<span class="stars" aria-label="${r.score} out of ${r.max || 5}">${starString(r.score, r.max || 5)}</span>`) : ''}<blockquote>“${r.quote}”</blockquote><figcaption><cite class="mono">${r.author ? `${r.author} — ` : ''}${r.source}</cite></figcaption></figure>`))}</div></section>`) : ''}
+    <section class="p-sec"><h3>Details</h3><div class="meta-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${gameFacts(g).map(([k, v]) => raw(html`<div><span class="mono">${k}</span><b>${v}</b></div>`))}</div></section>
+    <div class="p-next"><button type="button" data-go="${prev.id}"><span class="mono">← Previous</span><b>${prev.title}</b></button><button type="button" data-go="${next.id}"><span class="mono">Next →</span><b>${next.title}</b></button></div>
+    <p style="padding:30px 0 90px"><a class="cta cta--ghost" href="#games"><span class="dot"></span>All games</a></p>
+  </div>`;
 }
 
-function openGame(id) {
-  const panel = $('[data-panel]');
-  const { games, studio } = DATA;
-  const idx = games.findIndex((g) => g.id === id);
-  const g = games[idx];
-  if (!panel.classList.contains('open')) lastFocus = document.activeElement;
-  if (!g) {
-    panel.innerHTML = html`<div class="panel-bar"><a class="brand" href="#games">${raw(LOGO)}FewClicks</a><button class="pill" type="button" data-close-panel>Close ✕</button></div>
-      <div class="not-found" data-not-found><div><span class="mono">Error 404</span><h2>That project doesn't exist.</h2><a class="pill pill--solid" href="#games">Browse all games →</a></div></div>`;
-    setMeta({ title: 'Game not found | FewClicks' });
-  } else {
-    setGameSeo(g, studio);
-    const prev = games[(idx - 1 + games.length) % games.length], next = games[(idx + 1) % games.length];
-    const verb = g.status === 'released' ? 'Get it on' : 'Wishlist on';
-    const meta = [['Platforms', g.platformList.map((p) => p.label).join(', ')], ['Release', g.status === 'released' ? formatDate(g.releaseDate) : `${formatDate(g.releaseDate)} · planned`], ['Genre', g.categoryList.map((c) => c.name).join(', ')], ['Price', g.price || '—']];
-    panel.innerHTML = html`
-    <div class="panel-bar"><a class="brand" href="#games">${raw(LOGO)}FewClicks</a><span class="mono">${String(idx + 1).padStart(2, '0')} / ${String(games.length).padStart(2, '0')}</span><div class="navs"><button class="icon-btn" type="button" data-go="${prev.id}" aria-label="Previous game: ${prev.title}">←</button><button class="icon-btn" type="button" data-go="${next.id}" aria-label="Next game: ${next.title}">→</button><button class="pill" type="button" data-close-panel>Close ✕</button></div></div>
-    <header class="p-hero"><img src="${g.media.hero}" alt="${g.title} artwork">
-      <div class="p-hero-c"><div><span class="mono">${STATUS[g.status].label} · ${g.categoryList.map((c) => c.name).join(' / ')}</span><h2 data-game-title>${g.title}</h2><p class="tagl">${g.tagline}</p></div>
-      ${g.media.icon ? raw(html`<img class="p-icon" src="${g.media.icon}" alt="" width="92" height="92" style="position:static">`) : ''}</div></header>
-    <div class="container">
-      <div class="meta-grid">${meta.map(([k, v]) => raw(html`<div><span class="mono">${k}</span><b>${v}</b></div>`))}</div>
-      <div class="p-body">
-        <div><p class="lead">${g.description.short}</p><div class="prose">${g.description.long.map((p) => raw(html`<p>${p}</p>`))}</div>
-          <div class="stores">${g.stores.map((s, i) => raw(html`<a class="pill ${i ? '' : 'pill--solid'}" href="${s.url || '#'}"${s.url && s.url !== '#' ? raw(' target="_blank" rel="noopener"') : ''} data-store>${(PLATFORMS[s.platform] || {}).icon || ''} ${s.label || `${verb} ${storeLabel(s)}`} <span class="arr">→</span></a>`))}${g.stores.length ? '' : raw('<span class="pill">Coming soon</span>')}</div></div>
-        <div>${g.features.length ? raw(html`<h3 class="mono" style="margin-bottom:16px;font-weight:400">Highlights</h3><ul class="feat-list">${g.features.map((f, i) => raw(html`<li><span>0${i + 1}</span>${f}</li>`))}</ul>`) : ''}
-          ${g.rating.count ? raw(html`<p style="margin-top:30px"><span class="mono">Player rating</span><br><span style="font-family:var(--display);font-size:56px;font-weight:300;letter-spacing:-.05em">${g.rating.average.toFixed(1)}</span> <span style="color:var(--accent)">${starString(g.rating.average)}</span> <span class="mono">${compactNumber(g.rating.count)} ratings</span></p>`) : ''}</div>
-      </div>
-      <section class="p-sec"><h3>Trailer</h3><div class="media">${g.hasTrailer ? raw(trailerHtml(g)) : raw(html`<div class="none"><img src="${g.media.cover}" alt=""><span class="mono" style="color:var(--fg)">Trailer coming soon</span></div>`)}</div></section>
-      ${g.media.screenshots.length ? raw(html`<section class="p-sec"><h3>Gallery</h3><div class="gallery">${g.media.screenshots.map((s, i) => raw(html`<button type="button" data-shot="${i}" aria-label="Open screenshot ${i + 1}"><img src="${s}" alt="${g.title} screenshot ${i + 1}" loading="lazy"></button>`))}</div></section>`) : ''}
-      ${g.reviews.length ? raw(html`<section class="p-sec"><h3>Press &amp; players</h3><div class="quotes">${g.reviews.map((r) => raw(html`<figure class="quote">${typeof r.score === 'number' ? raw(html`<span class="stars" aria-label="${r.score} out of ${r.max || 5}">${starString(r.score, r.max || 5)}</span>`) : ''}<blockquote>“${r.quote}”</blockquote><figcaption><cite>${r.author ? `${r.author} — ` : ''}${r.source}</cite></figcaption></figure>`))}</div></section>`) : ''}
-      <section class="p-sec"><h3>Details</h3><div class="meta-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${gameFacts(g).map(([k, v]) => raw(html`<div><span class="mono">${k}</span><b>${v}</b></div>`))}</div></section>
-      <div class="p-next"><button type="button" data-go="${prev.id}"><span class="mono">← Previous</span><b>${prev.title}</b></button><button type="button" data-go="${next.id}"><span class="mono">Next →</span><b>${next.title}</b></button></div>
-      <p style="padding:40px 0 90px"><a class="pill" href="#games">← All games</a></p>
-    </div>`;
-    bindLightbox($('#lightbox'), g, { root: panel });
-  }
-  panel.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { location.hash = `game/${b.dataset.go}`; sfx.whoosh(); }));
-  panel.querySelectorAll('[data-close-panel]').forEach((b) => b.addEventListener('click', () => closePanel(true)));
-  panel.querySelectorAll('[data-store][href="#"]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); toast('Store page coming soon'); }));
-  panel.scrollTop = 0;
-  if (!panel.classList.contains('open')) { panel.classList.add('open'); sfx.whoosh(); }
-  document.body.classList.add('locked');
-  panel.querySelector('[data-close-panel]')?.focus({ preventScroll: true });
-}
-
-function closePanel(updateHash) {
-  const panel = $('[data-panel]');
-  if (!panel || !panel.classList.contains('open')) return;
-  panel.classList.remove('open');
-  document.body.classList.remove('locked');
-  setMeta({ title: 'FewClicks: games you can love in a few clicks', description: DATA.studio.description });
-  if (updateHash) history.pushState(null, '', `${location.pathname}${location.search}#games`);
-  lastFocus?.focus?.({ preventScroll: true });
-}
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('dialog[open]')) closePanel(true); });
-
-// ---------------- news ----------------
-function bindNews() {
+function bindNews({ news, games }) {
   const nm = $('#news-modal');
   bindDialog(nm);
   $('#news').addEventListener('click', (e) => {
     const b = e.target.closest('[data-news-item]');
     if (!b) return;
-    const p = DATA.news.find((x) => x.id === b.dataset.id);
-    const g = DATA.games.find((x) => x.id === p.gameId);
-    $('[data-modal-body]', nm).innerHTML = html`<span class="mono">${p.tag} · ${formatDate(p.date)}</span><h2 id="nm-t">${p.title}</h2>${p.image ? raw(html`<img src="${p.image}" alt="" style="border-radius:4px">`) : ''}${p.body.map((t) => raw(html`<p>${t}</p>`))}${g ? raw(html`<p><a class="pill pill--solid" href="#game/${g.id}" data-close>View ${g.title} →</a></p>`) : ''}`;
+    const p = news.find((x) => x.id === b.dataset.id);
+    const g = games.find((x) => x.id === p.gameId);
+    $('[data-modal-body]', nm).innerHTML = html`<span class="mono">${p.tag} · ${formatDate(p.date)}</span><h2 id="nm-t">${p.title}</h2>${p.image ? raw(html`<img src="${p.image}" alt="">`) : ''}${p.body.map((t) => raw(html`<p>${t}</p>`))}${g ? raw(html`<p><a class="cta" href="#game/${g.id}" data-close><span class="dot"></span>Open ${g.title}</a></p>`) : ''}`;
     nm.showModal();
   });
-}
-
-let tt;
-function toast(t) {
-  const el = $('[data-toast]');
-  el.textContent = t;
-  el.classList.add('show');
-  clearTimeout(tt);
-  tt = setTimeout(() => el.classList.remove('show'), 2200);
 }
