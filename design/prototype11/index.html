@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <!-- Clean app: only this site's own files are ever loaded. No CDNs, no analytics, no tracking. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self'; media-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#ffffff">
+  <title>FewClicks Studios · Whiteboard</title>
+  <meta name="description" content="The FewClicks Studios whiteboard: pin, toss and play with our games. Everything stays in your browser.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='white' stroke='black' stroke-width='8'/><circle cx='50' cy='42' r='16' fill='%23ff3b30'/><path d='M50 58v26' stroke='black' stroke-width='7'/></svg>">
+  <link rel="stylesheet" href="fonts/fonts.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#tools">Skip to tools</a>
+  <h1 class="sr-only">FewClicks Studios interactive whiteboard</h1>
+
+  <div class="viewport" data-viewport aria-label="Whiteboard. Drag to pan, scroll or pinch to zoom." role="application">
+    <div class="layer" data-layer><div class="board" aria-hidden="true"><div class="tray"></div></div></div>
+    <canvas class="ink" data-ink aria-hidden="true"></canvas>
+    <canvas class="lights" data-lights aria-hidden="true"></canvas>
+  </div>
+
+  <header class="topbar">
+    <div class="brand"><span class="logo" aria-hidden="true">F</span><span>FewClicks <b>Whiteboard</b></span></div>
+    <div class="group" role="group" aria-label="History">
+      <button type="button" class="btn" data-undo title="Undo (Ctrl+Z)" aria-label="Undo"></button>
+      <button type="button" class="btn" data-redo title="Redo (Ctrl+Shift+Z)" aria-label="Redo"></button>
+    </div>
+    <div class="group seg" role="group" aria-label="Gravity" data-gravity>
+      <span class="seg-l">Gravity</span>
+      <button type="button" data-g="on">On</button><button type="button" data-g="low">Low</button><button type="button" data-g="off">Off</button>
+    </div>
+    <div class="group" role="group" aria-label="Board">
+      <button type="button" class="btn" data-flash title="Flashlight cursor (F)" aria-label="Flashlight cursor" aria-pressed="false"></button>
+      <button type="button" class="btn" data-snd aria-label="Sound"></button>
+      <button type="button" class="btn" data-export title="Export board (JSON file)" aria-label="Export board"></button>
+      <button type="button" class="btn" data-import title="Import board" aria-label="Import board"></button>
+      <button type="button" class="btn" data-reset title="Reset board" aria-label="Reset board"></button>
+      <button type="button" class="btn" data-info title="Privacy & help" aria-label="Privacy and help"></button>
+    </div>
+  </header>
+
+  <nav class="tools" id="tools" data-tools aria-label="Tools"></nav>
+  <div class="drawer" data-stickers hidden role="dialog" aria-label="Stickers"></div>
+  <div class="fontmenu" data-fontmenu hidden role="dialog" aria-label="Fonts"></div>
+  <div class="ctxbar-host"></div>
+
+  <aside class="nav-box" aria-label="Minimap and zoom">
+    <canvas class="minimap" data-minimap tabindex="0" aria-label="Minimap: click to move the view"></canvas>
+    <div class="zoom"><button type="button" class="btn" data-zout aria-label="Zoom out"></button><span data-zoom aria-live="polite">100%</span><button type="button" class="btn" data-zin aria-label="Zoom in"></button><button type="button" class="btn" data-fit title="Fit everything (0)" aria-label="Fit everything"></button></div>
+  </aside>
+
+  <aside class="panel" data-panel hidden aria-label="Game details"></aside>
+
+  <dialog class="info" data-infodlg aria-labelledby="info-t">
+    <h2 id="info-t">Your board, your browser.</h2>
+    <p>This whiteboard is a little playground for <b>FewClicks Studios</b>. Everything you add or move is saved <b>only in this browser's local storage</b>.</p>
+    <ul>
+      <li>No accounts, no cookies, no analytics, no trackers.</li>
+      <li>Nothing is uploaded: your photos never leave your device.</li>
+      <li>All fonts, images and code load from fewclicks.org itself.</li>
+      <li>Use <b>Export</b> to keep a copy, <b>Reset</b> to start over.</li>
+    </ul>
+    <p class="muted" data-storage></p>
+    <h3>Tips</h3>
+    <p class="muted"><b>Drag</b> to move, <b>flick</b> to toss · tap a <b>pin</b> to drop an item · <b>double-click</b> to add or edit text · <b>scroll / pinch</b> to zoom · <b>Space + drag</b> to pan · <b>F</b> flashlight · <b>C</b> snapshot · <b>Del</b> delete.</p>
+    <p class="muted">Contact: <a href="mailto:admin@fewclicks.org">admin@fewclicks.org</a></p>
+    <button type="button" class="btn wide" data-close>Got it</button>
+  </dialog>
+
+  <input type="file" accept="image/*" data-file hidden>
+  <input type="file" accept="application/json,.json" data-importfile hidden>
+  <div class="toast" data-toast role="status" aria-live="polite"></div>
+  <div class="flashfx" aria-hidden="true"></div>
+
+  <script src="../vendor/matter.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

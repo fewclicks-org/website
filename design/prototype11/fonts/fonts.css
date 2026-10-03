@@ -1,0 +1,16 @@
+/* Self-hosted fonts (SIL Open Font License). No external font requests. */
+@font-face { font-family: 'Rubik Bubbles'; src: url('rubik-bubbles.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Bungee'; src: url('bungee.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Monoton'; src: url('monoton.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Pacifico'; src: url('pacifico.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Permanent Marker'; src: url('permanent-marker.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Press Start 2P'; src: url('press-start-2p.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Bebas Neue'; src: url('bebas-neue.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Caveat'; src: url('caveat.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Lobster'; src: url('lobster.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Rampart One'; src: url('rampart-one.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Righteous'; src: url('righteous.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Caveat'; src: url('caveat-600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url('inter-400.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url('inter-600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Inter'; src: url('inter-800.woff2') format('woff2'); font-weight: 800; font-display: swap; }
