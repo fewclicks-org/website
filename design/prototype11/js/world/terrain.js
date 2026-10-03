@@ -9,7 +9,7 @@ const MAX_H = 2400; // highest hill
 export const BEDROCK = 1000; // bedrock depth below the base ground line
 export const MATS = { grass: 0, sand: 1, clay: 2, rock: 3, dirt: 4 };
 const MAT_NAMES = Object.keys(MATS);
-const MAT_FRICTION = [0.85, 0.95, 0.8, 0.6, 0.85];
+const MAT_FRICTION = [0.85, 0.95, 0.8, 0.6, 0.85, 0, 0, 0, 0, 0.01]; // 9 = ice
 
 const hash = (i) => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
 
@@ -19,6 +19,7 @@ export function createTerrain({ groundY }) {
   const dirty = new Set(); // chunk indexes whose physics must be rebuilt
   const bodies = new Map(); // chunk -> [bodies]
   let physics = null;
+  let topHook = () => 0; // extra solid height on top of a column (thick ice)
   let bedrock = null;
   let version = 0;
 
@@ -87,8 +88,9 @@ export function createTerrain({ groundY }) {
     (bodies.get(k) || []).forEach((b) => Composite.remove(physics.engine.world, b));
     const list = [];
     const c0 = k * CHUNK, c1 = c0 + CHUNK;
+    const hs = (c) => h(c) + topHook(c);
     // merge runs of equal slope into single segments
-    let sx = c0 * COL, sy = groundY - h(c0);
+    let sx = c0 * COL, sy = groundY - hs(c0);
     let slope = null;
     const T = 260;
     const emit = (x1, y1, x2, y2, mat) => {
@@ -96,15 +98,18 @@ export function createTerrain({ groundY }) {
       const nx = -Math.sin(th), ny = Math.cos(th);
       const b = Bodies.rectangle((x1 + x2) / 2 + (nx * T) / 2, (y1 + y2) / 2 + (ny * T) / 2, L + 6, T, { isStatic: true, angle: th, label: 'ground', friction: MAT_FRICTION[mat] ?? 0.8 });
       b.groundChunk = k;
+      b.friction = MAT_FRICTION[mat] ?? 0.8; // static bodies default to friction 1
+      b.frictionStatic = mat === 9 ? 0.02 : 0.5;
       list.push(b);
     };
     for (let c = c0 + 1; c <= c1; c++) {
-      const x = c * COL, y = groundY - h(c);
-      const px = (c - 1) * COL, py = groundY - h(c - 1);
+      const x = c * COL, y = groundY - hs(c);
+      const px = (c - 1) * COL, py = groundY - hs(c - 1);
       const s = (y - py) / COL;
-      if (slope !== null && (Math.abs(s - slope) > 0.002 || (MAT.get(c - 1) ?? 0) !== (MAT.get(c - 2) ?? 0))) { emit(sx, sy, px, py, MAT.get(c - 2) ?? 0); sx = px; sy = py; }
+      const iceEdge = (topHook(c - 1) > 0) !== (topHook(c - 2) > 0);
+      if (slope !== null && (Math.abs(s - slope) > 0.002 || iceEdge || (MAT.get(c - 1) ?? 0) !== (MAT.get(c - 2) ?? 0))) { emit(sx, sy, px, py, topHook(c - 2) > 0 ? 9 : MAT.get(c - 2) ?? 0); sx = px; sy = py; }
       slope = s;
-      if (c === c1) emit(sx, sy, x, y, MAT.get(c - 1) ?? 0);
+      if (c === c1) emit(sx, sy, x, y, topHook(c - 1) > 0 ? 9 : MAT.get(c - 1) ?? 0);
     }
     list.forEach((b) => Composite.add(physics.engine.world, b));
     bodies.set(k, list);
@@ -115,7 +120,7 @@ export function createTerrain({ groundY }) {
     const { Composite } = physics.M;
     for (const [k, list] of bodies) if (!need.has(k)) { list.forEach((b) => Composite.remove(physics.engine.world, b)); bodies.delete(k); }
     for (const k of need) if (!bodies.has(k) || dirty.has(k)) buildChunk(k);
-    for (const k of [...dirty]) if (!need.has(k)) dirty.delete(k); else dirty.delete(k);
+    dirty.clear();
   }
   const chunkOf = (x) => Math.floor(x / (COL * CHUNK));
 
@@ -249,6 +254,8 @@ export function createTerrain({ groundY }) {
   function profile(x0, x1, n = 80) { return Array.from({ length: n + 1 }, (_, i) => { const x = x0 + ((x1 - x0) * i) / n; return [x, surfaceY(x)]; }); }
 
   return {
+    setTopHook: (fn) => { topHook = fn; },
+    markDirty: (c) => { dirty.add(Math.floor(c / CHUNK)); },
     groundY, surfaceY, slopeAt, matAt, brush, hill, paint, heightAtCol, colOf,
     attach, syncBodies, chunkOf, serialize, load, draw, profile,
     get version() { return version; },

@@ -4,6 +4,7 @@
 import {
   STICKERS, OBJECTS, fontFamily, cloudSvg, fireSvg, fanSvg, magnetSvg, potSvg, plantSvg, diceSvg, clockSvg,
   duckSvg, clipSvg, iceSvg, coinSvg, spinnerSvg, extinguisherSvg,
+  boreSvg, tankSvg, sprinklerSvg, tapSvg, canSvg, bucketSvg, windsockSvg, flagSvg, kiteSvg,
 } from './art.js';
 import { strokePath } from './pen.js';
 
@@ -18,12 +19,17 @@ export const METAL_TYPES = new Set(['coin', 'clip', 'camera', 'torch', 'fan', 'e
 /** Things that float in water (others sink). */
 export const FLOATERS = new Set(['note', 'text', 'photo', 'card', 'doodle', 'bubble', 'game', 'sticker', 'duck', 'ball', 'balloon', 'ice', 'plant', 'dice']);
 
+/** Things that connect with pipes. */
+export const PIPE_TYPES = new Set(['bore', 'tank', 'sprinkler', 'tap']);
+/** Things that stand in the ground (snap to the terrain, don't fall over). */
+export const ROOTED = new Set(['bore', 'windsock', 'flag', 'sprinkler']);
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /** Default physics/pin mode for newly created items. */
 export function defaultPin(type) {
-  if (['sun', 'torch', 'camera', 'title', 'doodle', 'cloud', 'water', 'spinner'].includes(type)) return 'lock';
-  if (['ball', 'balloon', 'sticker', 'fire', 'fan', 'dice', 'duck', 'coin', 'clip', 'ice', 'extinguisher', 'plant'].includes(type)) return null;
+  if (['sun', 'torch', 'camera', 'title', 'doodle', 'cloud', 'water', 'spinner', 'bore', 'windsock', 'flag', 'sprinkler', 'tank', 'tap'].includes(type)) return 'lock';
+  if (['ball', 'balloon', 'sticker', 'fire', 'fan', 'dice', 'duck', 'coin', 'clip', 'ice', 'extinguisher', 'plant', 'can', 'bucket', 'kite'].includes(type)) return null;
   return 'pin';
 }
 
@@ -55,6 +61,7 @@ export function label(item) {
     title: d.text, text: `Text: ${d.text}`, note: `Note: ${d.text}`, bubble: `Speech bubble: ${d.text}`, photo: `Photo: ${d.caption || 'picture'}`, game: `Game: ${d.caption}`,
     sticker: 'Sticker', doodle: 'Drawing', sun: 'Sun (light source)', lamp: 'Hanging lamp', torch: 'Torch', ball: 'Bouncy ball', balloon: 'Balloon', camera: 'Instant camera', card: `Card: ${d.title || 'Say hello'}`,
     cloud: `${d.mode || 'rain'} cloud`, fire: 'Campfire', water: d.frozen ? 'Ice' : 'Water pool', fan: 'Fan', magnet: 'Magnet', plant: `Plant (${d.species || 'flower'})`,
+    bore: `Water bore (${d.pump || 'hand'} pump)`, tank: 'Water tank', sprinkler: 'Sprinkler', tap: 'Tap', can: 'Watering can', bucket: 'Bucket', windsock: 'Wind sock', flag: 'Flag', kite: 'Kite',
     dice: 'Dice', clock: 'Clock', duck: 'Rubber duck', coin: 'Coin', clip: 'Paperclip', ice: 'Ice cube', spinner: 'Spinner wheel', extinguisher: 'Fire extinguisher',
   })[item.type] || item.type;
 }
@@ -116,6 +123,24 @@ function inner(item) {
       return `<div class="obj">${iceSvg()}</div>`;
     case 'spinner':
       return `<div class="obj">${spinnerSvg(d.labels || ['Play', 'Again', 'Win', 'GG', 'Wow', 'Yay'])}</div><span class="open-hint">tap to spin</span>`;
+    case 'bore':
+      return `<div class="obj">${boreSvg(d.pump || 'hand')}</div><span class="open-hint">${d.pump === 'hand' || !d.pump ? 'tap to pump' : 'right-click: pipe'}</span>`;
+    case 'tank':
+      return `<div class="obj">${tankSvg()}</div><span class="gauge" aria-hidden="true"></span>`;
+    case 'sprinkler':
+      return `<div class="obj">${sprinklerSvg()}</div>`;
+    case 'tap':
+      return `<div class="obj">${tapSvg()}</div><span class="open-hint">tap to open</span>`;
+    case 'can':
+      return `<div class="obj">${canSvg()}</div><span class="open-hint">tilt to pour</span>`;
+    case 'bucket':
+      return `<div class="obj">${bucketSvg()}</div>`;
+    case 'windsock':
+      return `<div class="obj">${windsockSvg()}</div>`;
+    case 'flag':
+      return `<div class="obj">${flagSvg()}</div>`;
+    case 'kite':
+      return `<div class="obj">${kiteSvg()}</div>`;
     case 'extinguisher':
       return `<div class="obj">${extinguisherSvg()}</div><span class="open-hint">tap to spray</span>`;
     default:
@@ -152,8 +177,18 @@ export function patch(el, item) {
     case 'water': el.classList.toggle('frozen', !!d.frozen); el.style.setProperty('--ice', Math.min(1, d.ice || 0).toFixed(2)); break;
     case 'dice': { const o = el.querySelector('.obj'); if (o && o.dataset.face !== String(d.face || 6)) { o.innerHTML = diceSvg(d.face || 6); o.dataset.face = String(d.face || 6); } break; }
     case 'ice': el.style.setProperty('--melt', (d.melt || 0).toFixed(2)); break;
+    case 'tank': case 'can': case 'bucket': {
+      el.style.setProperty('--lvl', Math.max(0, Math.min(1, d.level || 0)).toFixed(3));
+      const g = el.querySelector('.gauge');
+      if (g) g.textContent = `${Math.round((d.level || 0) * 100)}%`;
+      break;
+    }
+    case 'sprinkler': case 'tap': el.classList.toggle('on', !!d.on); el.classList.toggle('flowing', !!d._flow); break;
+    case 'bore': el.classList.toggle('dry', !!d._dry); el.classList.toggle('pumping', !!d._flow); break;
     default: break;
   }
+  el.classList.toggle('wet', (d.wet || 0) > 0.15);
+  if (d.wet > 0.15) el.style.setProperty('--wet', Math.min(1, d.wet).toFixed(2));
   if (d.burn) { el.classList.add('burning'); el.style.setProperty('--burn', Math.min(1, d.burn).toFixed(3)); }
   else if (el.classList.contains('burning')) { el.classList.remove('burning'); el.style.removeProperty('--burn'); }
 }

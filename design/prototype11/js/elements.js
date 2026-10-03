@@ -8,7 +8,7 @@ import { PAPER_TYPES, METAL_TYPES, FLOATERS } from './items.js';
 const MAX_PARTICLES = 1400;
 const rot = (x, y, a) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
 
-export function createElements({ physics, lights, camera, canvas, els, sizes, getItems, getLinks, api }) {
+export function createElements({ physics, lights, camera, canvas, els, sizes, getItems, getLinks, api, water, atmos }) {
   const ctx = canvas.getContext('2d');
   const { Query } = physics.M;
   const T = physics.terrain;
@@ -22,7 +22,8 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
   addEventListener('resize', resize);
   resize();
 
-  const world = { wind: 0 };
+  // wind comes from the atmosphere (auto by season + weather, or set by the visitor)
+  const world = { get wind() { return atmos.wind; }, set wind(v) { atmos.setMode(v ? 'manual' : 'auto', v); } };
   const P = []; // particles
   const bolts = [];
   const state = new Map(); // per-item runtime state (not saved): next strike, spray timer, spin velocity
@@ -42,27 +43,31 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
   physics.onBeforeUpdate(() => {
     const items = getItems();
     const g = physics.engine.gravity.y;
-    const pools = items.filter((i) => i.type === 'water' && !i.d.frozen);
     const fans = items.filter((i) => i.type === 'fan' && i.d.on);
     const fires = items.filter((i) => i.type === 'fire' && i.d.lit !== false);
     const magnets = items.filter((i) => i.type === 'magnet');
-    if (!pools.length && !fans.length && !fires.length && !magnets.length && !world.wind) return;
+    const anyWater = water.activeCount > 0;
     physics.map.forEach((rec) => {
       const { item, body } = rec;
       if (item.type === 'water' || item.type === 'cloud' || (body.isStatic && !rec.frozen)) return;
       if (physics.dragId === item.id) return;
-      // water: buoyancy + drag
-      for (const w of pools) {
-        const wb = physics.bodyOf(w.id)?.bounds;
-        if (!wb || body.position.x < wb.min.x || body.position.x > wb.max.x || body.bounds.max.y < wb.min.y || body.bounds.min.y > wb.max.y) continue;
-        const hgt = body.bounds.max.y - body.bounds.min.y || 1;
-        const frac = Math.max(0, Math.min(1, (body.bounds.max.y - wb.min.y) / hgt));
-        const k = FLOATERS.has(item.type) ? 1.9 : 0.55;
-        if (g) physics.push(rec, 0, -k * frac * g);
-        physics.setVelocity(rec, body.velocity.x * 0.97, body.velocity.y * 0.95);
-        if (!rec.wet && body.velocity.y > 5) splash(body.position.x, wb.min.y, 10);
-        rec.wet = true;
-        if (item.type === 'fire' && item.d.lit !== false) extinguish(item);
+      // water: buoyancy + drag from the real water surface under the item
+      if (anyWater) {
+        const ws = water.surfaceAt(body.position.x, 3);
+        if (ws != null && body.bounds.max.y > ws) {
+          const hgt = body.bounds.max.y - body.bounds.min.y || 1;
+          const frac = Math.max(0, Math.min(1, (body.bounds.max.y - ws) / hgt));
+          const ice = water.iceAt(body.position.x) > 5;
+          if (!ice) {
+            const k = FLOATERS.has(item.type) ? 1.9 : 0.55;
+            if (g) physics.push(rec, 0, -k * frac * g);
+            physics.setVelocity(rec, body.velocity.x * 0.97, body.velocity.y * 0.95);
+            if (!rec.wet && body.velocity.y > 5) { splash(body.position.x, ws, 12); api.sfx.splash(); }
+            rec.wet = true;
+            item.d.wet = 1;
+            if (item.type === 'fire' && item.d.lit !== false) extinguish(item);
+          }
+        } else rec.wet = false;
       }
       // fans blow along their facing
       for (const f of fans) {
@@ -103,7 +108,12 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
         }
       }
       // global wind nudges light things
-      if (world.wind && (item.type === 'balloon' || FLOATERS.has(item.type) && !item.pin)) physics.push(rec, world.wind * 0.08, 0);
+      // wind: light things flutter and drift (force grows with the square of the wind speed)
+      const wv = world.wind;
+      if (Math.abs(wv) > 0.15 && (item.type === 'balloon' || item.type === 'kite' || (FLOATERS.has(item.type) && !item.pin && item.type !== 'plant'))) {
+        const light = item.type === 'balloon' || item.type === 'kite' ? 1.4 : item.type === 'note' || item.type === 'photo' || item.type === 'doodle' || item.type === 'text' ? 0.6 : 0.25;
+        physics.push(rec, Math.sign(wv) * wv * wv * 0.05 * light, -Math.abs(wv) * 0.02 * light);
+      }
     });
   });
 
@@ -253,8 +263,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
         if (touching && PAPER_TYPES.has(it.type)) { it.d.burn = (it.d.burn || 0) + dt / 2600; api.patch(it); mark(); }
         if (touching && it.type === 'ice') { it.d.melt = (it.d.melt || 0) + dt / 3500; api.patch(it); mark(); }
         if (it.type === 'fire' && it.d.lit === false && touching) ignite(it);
-        if (it.type === 'water' && it.d.frozen && Math.hypot(it.x - f.x, it.y - f.y) < 700) { it.d.ice = (it.d.ice || 1) - 0.004 * t60; if (it.d.ice < 0.5) thawWater(it); api.patch(it); mark(); }
-        if (it.type === 'plant' && Math.hypot(it.x - f.x, it.y - f.y) < 380) { it.d.dry = Math.min(1, (it.d.dry || 0) + 0.004 * t60); it.d.growth = Math.max(0.15, (it.d.growth ?? 0.5) - 0.0006 * t60); api.patch(it); mark(); }
+          if (it.type === 'plant' && Math.hypot(it.x - f.x, it.y - f.y) < 380) { it.d.dry = Math.min(1, (it.d.dry || 0) + 0.004 * t60); it.d.growth = Math.max(0.15, (it.d.growth ?? 0.5) - 0.0006 * t60); api.patch(it); mark(); }
         if (it.d?.snow && Math.hypot(it.x - f.x, it.y - f.y) < 600) { it.d.snow = Math.max(0, it.d.snow - 0.01 * t60); mark(); }
       }
     }
@@ -275,14 +284,11 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     const sunUp = lights.darkness < 0.3;
     if (sunUp && Math.random() < 0.2) for (const it of items) if (it.d?.snow) { it.d.snow = Math.max(0, it.d.snow - 0.002); }
 
-    // water: plants drink from pools
-    for (const p of of('plant')) {
-      for (const w of of('water')) {
-        if (w.d.frozen) continue;
-        const wb = physics.bodyOf(w.id)?.bounds, pb = physics.bodyOf(p.id)?.bounds;
-        if (wb && pb && pb.max.x > wb.min.x && pb.min.x < wb.max.x && pb.max.y > wb.min.y - 30 && pb.min.y < wb.max.y) { grow(p, 0.0008 * t60); }
-      }
-    }
+    // plants drink from wet soil
+    if (Math.random() < 0.05 * t60) for (const p of of('plant')) { const m = water.moistureAt(p.x); if (m > 0.55) grow(p, 0.002 * m); else if (m < 0.18) { p.d.dry = Math.min(1, (p.d.dry || 0) + 0.01); api.patch(p); } }
+
+    // wet things dry in the sun and wind
+    if (Math.random() < 0.1 * t60) for (const it of items) if (it.d?.wet) { it.d.wet = Math.max(0, it.d.wet - (0.01 + Math.abs(world.wind) * 0.005) * (sunUp ? 2 : 0.5)); api.patch(it); }
 
     // extinguisher spray
     for (const e of of('extinguisher')) {
@@ -339,24 +345,25 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       const skipIds = new Set(of('cloud').map((c) => c.id));
       physics.map.forEach((rec) => { if (!rec.body.isSensor && !skipIds.has(rec.item.id)) solids.push(rec); });
       const solidBodies = solids.map((r) => r.body);
-      const pools = of('water').filter((w) => !w.d.frozen).map((w) => ({ w, b: physics.bodyOf(w.id)?.bounds })).filter((p) => p.b);
       const recByBody = new Map(solids.map((r) => [r.body, r]));
       for (let i = P.length - 1; i >= 0; i--) {
         const p = P[i];
         p.life -= t60;
-        if (p.k === 'rain' || p.k === 'snow' || p.k === 'foam') {
+        if (p.k === 'run') { if (runStep(p, t60)) P.splice(i, 1); continue; }
+        if (p.k === 'rain' || p.k === 'snow' || p.k === 'foam' || p.k === 'drip') {
           const fv = fanVec(p.x, p.y);
           p.vx += (fv.x * 0.6 + (p.k === 'rain' ? world.wind * 0.02 : 0)) * t60;
           p.vy += fv.y * 0.6 * t60;
           if (p.k === 'rain') p.vy = Math.min(22, p.vy + 0.5 * t60);
+          if (p.k === 'drip') { p.vy = Math.min(20, p.vy + 0.45 * t60); p.vx += world.wind * 0.01 * t60; }
           if (p.k === 'snow') { p.ph += 0.05 * t60; p.vx = p.vx * 0.96 + (Math.sin(p.ph) * 0.6 + world.wind * 1.2) * 0.04; p.vy = Math.min(2.6, p.vy + 0.02 * t60); }
           if (p.k === 'foam') p.vy += p.g * t60;
           p.x += p.vx * t60; p.y += p.vy * t60;
-          // pools first (sensor water)
-          const pool = pools.find(({ b }) => p.x > b.min.x && p.x < b.max.x && p.y > b.min.y && p.y < b.max.y);
-          if (pool) {
-            if (p.k === 'snow') { pool.w.d.ice = Math.min(1.2, (pool.w.d.ice || 0) + 0.012); if (pool.w.d.ice >= 1 && !pool.w.d.frozen) freezeWater(pool.w); api.patch(pool.w); mark(); }
-            else splash(p.x, pool.b.min.y, 1);
+          // water surface (ponds, puddles)
+          const ws = water.surfaceAt(p.x, 1.5);
+          if (ws != null && p.y >= ws) {
+            if (p.k === 'snow') { if (water.iceAt(p.x) < 1) water.add(p.x, 0.04); }
+            else if (p.k !== 'foam') { water.add(p.x, 0.08); if (Math.random() < 0.35) splash(p.x, ws, 1, 'rgba(160,210,255,.9)'); ripple(p.x, ws); }
             P.splice(i, 1); continue;
           }
           const hit = Query.point(solidBodies, { x: p.x, y: p.y })[0];
@@ -364,8 +371,15 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
           if (hit || p.y >= gy) {
             const rec = hit && recByBody.get(hit);
             onHit(p, rec);
-            if (p.k === 'rain') splash(p.x, Math.min(p.y, gy), 2);
-            if (p.k === 'snow' && !rec) { /* snow melts on the ground */ }
+            if ((p.k === 'rain' || p.k === 'drip') && rec && !rec.body.isSensor && rec.item.type !== 'fire') {
+              // water doesn't vanish: it runs along the top of the item and drips off the lower edge
+              if (startRun(p, rec)) { P.splice(i, 1); continue; }
+            }
+            if (p.k === 'rain' || p.k === 'drip') {
+              if (!rec) { water.add(p.x, 0.1); if (Math.random() < 0.5) splash(p.x, gy, 2); }
+              else splash(p.x, p.y, 1);
+            }
+            if (p.k === 'snow' && !rec) groundSnow(p.x);
             P.splice(i, 1); continue;
           }
           if (p.life <= 0) { P.splice(i, 1); continue; }
@@ -383,10 +397,75 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     return changed;
   }
 
+  // ---------------- runoff: drops run along the top edge of an item and drip off ----------------
+  function topEdge(body, x, y) {
+    const v = body.vertices, n = v.length;
+    const cx = body.position.x, cy = body.position.y;
+    let best = null;
+    for (let i = 0; i < n; i++) {
+      const a = v[i], b = v[(i + 1) % n];
+      const lo = Math.min(a.x, b.x), hi = Math.max(a.x, b.x);
+      if (x < lo - 2 || x > hi + 2 || hi - lo < 0.5) continue;
+      const t = Math.max(0, Math.min(1, (x - a.x) / (b.x - a.x)));
+      const ey = a.y + (b.y - a.y) * t;
+      if (ey > cy) continue; // must be on the upper side of the body
+      if (!best || ey < best.ey) best = { i, t, ey };
+    }
+    return best;
+  }
+  function edgeNormalUp(body, i) {
+    const v = body.vertices, a = v[i], b = v[(i + 1) % v.length];
+    const ex = b.x - a.x, ey = b.y - a.y, l = Math.hypot(ex, ey) || 1;
+    let nx = -ey / l, ny = ex / l;
+    const mx = (a.x + b.x) / 2 - body.position.x, my = (a.y + b.y) / 2 - body.position.y;
+    if (nx * mx + ny * my < 0) { nx = -nx; ny = -ny; }
+    return ny; // < 0 means the edge faces up
+  }
+  function startRun(p, rec) {
+    const body = rec.body;
+    const e = topEdge(body, p.x, p.y);
+    if (!e) return false;
+    const v = body.vertices, a = v[e.i], b = v[(e.i + 1) % v.length];
+    // dir +1 = move from vertex a to b, -1 = from b to a; always downhill
+    let dir = b.y >= a.y ? 1 : -1;
+    if (Math.abs(b.y - a.y) < 0.5) dir = Math.random() < 0.5 ? -1 : 1;
+    add({ k: 'run', id: rec.item.id, i: e.i, u: e.t, dir, sp: 0.6 + Math.random() * 0.6, life: 400, x: p.x, y: e.ey });
+    rec.item.d.wet = Math.min(1, (rec.item.d.wet || 0) + 0.02);
+    if (Math.random() < 0.1) api.patch(rec.item);
+    return true;
+  }
+  function runStep(p, t60) {
+    const rec = physics.recOf(p.id);
+    p.life -= t60;
+    if (!rec || p.life <= 0) return true;
+    const v = rec.body.vertices, n = v.length;
+    let a = v[p.i % n], b = v[(p.i + 1) % n];
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const steep = Math.abs(b.y - a.y) / len;
+    p.u += (p.dir * (p.sp + steep * 5) * t60) / len;
+    if (p.u > 1 || p.u < 0) {
+      // move on to the next edge if it still faces up, otherwise drip off this corner
+      const ni = (p.i + (p.dir > 0 ? 1 : -1) + n) % n;
+      if (edgeNormalUp(rec.body, ni) < -0.25) { p.i = ni; p.u = p.dir > 0 ? 0 : 1; a = v[ni]; b = v[(ni + 1) % n]; }
+      else {
+        const cx = p.dir > 0 ? b.x : a.x, cy = p.dir > 0 ? b.y : a.y;
+        add({ k: 'drip', x: cx + (cx > rec.body.position.x ? 2 : -2), y: cy + 2, vx: (cx > rec.body.position.x ? 1 : -1) * 0.8 + rec.body.velocity.x, vy: 1, life: 300 });
+        return true;
+      }
+    }
+    p.x = a.x + (b.x - a.x) * p.u;
+    p.y = a.y + (b.y - a.y) * p.u - 2;
+    return false;
+  }
+  const ripples = [];
+  function ripple(x, y) { if (ripples.length < 60 && Math.random() < 0.3) ripples.push({ x, y, r: 2, life: 30 }); }
+  let snowAcc = 0;
+  function groundSnow(x) { snowAcc += 1; }
+
   function onHit(p, rec) {
     if (!rec) return;
     const it = rec.item;
-    if (p.k === 'rain') {
+    if (p.k === 'rain' || p.k === 'drip') {
       if (it.type === 'fire' && it.d.lit !== false) { it.d.wet = (it.d.wet || 0) + 0.02; if (it.d.wet >= 1) extinguish(it); mark(); }
       if (it.d.onfire) { it.d.wet = (it.d.wet || 0) + 0.05; if (it.d.wet >= 1) { it.d.onfire = false; it.d.wet = 0; smoke(it.x, it.y, 8); api.sfx.fizz(); } mark(); }
       if (it.type === 'plant') grow(it, 0.0004);
@@ -407,30 +486,33 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     if (Math.abs(p.d.growth - (p._pg || 0)) > 0.004 || p.d.dry < 0.5) { p._pg = p.d.growth; api.patch(p); }
     mark();
   }
-  function freezeWater(w) {
-    w.d.frozen = true;
-    w.d.ice = 1;
-    physics.setSolid(w.id, true, 0.01);
-    api.patch(w);
-    api.sfx.tick();
-    api.toast('The water froze into ice. Slippery!');
-    mark();
-  }
-  function thawWater(w) {
-    w.d.frozen = false;
-    w.d.ice = 0;
-    physics.setSolid(w.id, false, 0.01);
-    api.patch(w);
-    splash(w.x, w.y, 20);
-    mark();
-  }
-
   // ---------------- drawing ----------------
+  let extraDraw = null; // set by app: { active(), draw(ctx, view, cam, t) } for water surfaces etc.
+  let pipeFlow = () => false;
+  function drawPipe(A, B, l) {
+    // pipes run down from A, along, and up into B (rounded elbows)
+    const a = { x: A.x, y: A.y + 20 }, b = { x: B.x, y: B.y + 20 };
+    const midY = Math.max(a.y, b.y) + 40;
+    const path = new Path2D();
+    path.moveTo(a.x, a.y); path.lineTo(a.x, midY - 30); path.quadraticCurveTo(a.x, midY, a.x + Math.sign(b.x - a.x) * 30, midY);
+    path.lineTo(b.x - Math.sign(b.x - a.x) * 30, midY); path.quadraticCurveTo(b.x, midY, b.x, midY - 30); path.lineTo(b.x, b.y);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#2b2f34'; ctx.lineWidth = 22; ctx.stroke(path);
+    ctx.strokeStyle = '#9aa3ad'; ctx.lineWidth = 16; ctx.stroke(path);
+    ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = 4; ctx.stroke(path);
+    if (pipeFlow(l.id)) {
+      ctx.strokeStyle = 'rgba(70,160,255,.95)'; ctx.lineWidth = 7;
+      ctx.setLineDash([18, 22]); ctx.lineDashOffset = -performance.now() / 18;
+      ctx.stroke(path);
+      ctx.setLineDash([]);
+    }
+    for (const p of [a, b]) { ctx.fillStyle = '#6b737c'; ctx.beginPath(); ctx.arc(p.x, p.y, 13, 0, Math.PI * 2); ctx.fill(); }
+  }
   function draw(cam) {
     const items = getItems();
     const links = getLinks();
     const snowy = items.filter((i) => i.d?.snow > 0.02);
-    if (!P.length && !bolts.length && !links.length && !snowy.length) {
+    if (!P.length && !bolts.length && !links.length && !snowy.length && !ripples.length && !(extraDraw && extraDraw.active())) {
       if (drewSomething) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, canvas.width, canvas.height); drewSomething = false; }
       return;
     }
@@ -447,6 +529,11 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       const A = items.find((i) => i.id === l.a), B = items.find((i) => i.id === l.b);
       if (!A || !B) continue;
       ctx.save();
+      if (l.kind === 'pipe') {
+        drawPipe(A, B, l);
+        ctx.restore();
+        continue;
+      }
       if (l.kind === 'tape') {
         const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2, ang = Math.atan2(B.y - A.y, B.x - A.x), len = Math.hypot(B.x - A.x, B.y - A.y);
         ctx.translate(mx, my); ctx.rotate(ang);
@@ -496,6 +583,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       ctx.beginPath(); ctx.moveTo(best.a.x, best.a.y - th / 2 - 1); ctx.lineTo(best.b.x, best.b.y - th / 2 - 1); ctx.stroke();
     }
 
+    if (extraDraw) extraDraw.draw(ctx, view, cam);
     // particles
     ctx.lineCap = 'round';
     for (const p of P) {
@@ -512,6 +600,15 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
         case 'foam':
           ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.arc(p.x, p.y, 7 + (70 - p.life) * 0.12, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          break;
+        case 'drip':
+          ctx.strokeStyle = 'rgba(80,150,230,.8)'; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx, p.y - Math.min(8, p.vy)); ctx.stroke();
+          break;
+        case 'run':
+          ctx.fillStyle = 'rgba(120,190,255,.95)';
+          ctx.beginPath(); ctx.ellipse(p.x, p.y, 4, 3, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.fillRect(p.x - 1.5, p.y - 2, 1.5, 1.5);
           break;
         case 'splash':
           ctx.fillStyle = p.col || 'rgba(90,140,200,.8)';
@@ -536,6 +633,14 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
         default: break;
       }
     }
+    // ripples on water
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const r = ripples[i];
+      r.r += 0.6; r.life -= 1;
+      if (r.life <= 0) { ripples.splice(i, 1); continue; }
+      ctx.strokeStyle = `rgba(230,248,255,${r.life / 40})`; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(r.x, r.y, r.r, r.r * 0.3, 0, 0, Math.PI * 2); ctx.stroke();
+    }
     // lightning
     for (const b of bolts) {
       for (const [w, col] of [[18, 'rgba(160,190,255,.35)'], [7, '#fff8c0'], [3, '#fff']]) {
@@ -547,7 +652,10 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
 
   return {
     world, update, draw, strike, extinguish, ignite, spray, spin, resize,
-    freezeWater, thawWater,
+    spawn: (p) => add(p),
+    setExtraDraw(o) { extraDraw = o; },
+    setPipeFlow(fn) { pipeFlow = fn; },
+    takeSnow() { const v = snowAcc; snowAcc = 0; return v; },
     get busy() { return P.length > 0 || bolts.length > 0; },
     particleCount: () => P.length,
     _parts: () => P,

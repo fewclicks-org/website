@@ -145,7 +145,7 @@ export function createPhysics({ terrain, reduced = false }) {
   function attachLink(L) {
     detachLink(L);
     const A = map.get(L.link.a), B = map.get(L.link.b);
-    if (!A || !B || L.link.kind === 'arrow') return;
+    if (!A || !B || L.link.kind === 'arrow' || L.link.kind === 'pipe') return;
     if (L.link.kind === 'tape') {
       const dx = B.body.position.x - A.body.position.x, dy = B.body.position.y - A.body.position.y;
       const d = Math.hypot(dx, dy) || 1, px = (-dy / d) * 24, py = (dx / d) * 24;

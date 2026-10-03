@@ -26,6 +26,11 @@ import { seedBoard, GROUND_Y, CENTER } from './seed.js';
 import { createTerrain } from './world/terrain.js';
 import { createWorld } from './world/world.js';
 import { SPEEDS } from './world/clock.js';
+import { createWater } from './world/water.js';
+import { createAtmos } from './world/atmos.js';
+import { createDevices } from './world/pipes.js';
+import { boreSvg, tankSvg, sprinklerSvg, tapSvg, canSvg, bucketSvg, windsockSvg, flagSvg, kiteSvg } from './art.js';
+import { PIPE_TYPES, ROOTED } from './items.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const viewport = $('[data-viewport]');
@@ -51,6 +56,8 @@ const history = createHistory(60);
 const TEXTY = new Set(['text', 'title', 'note', 'bubble']);
 
 const terrain = createTerrain({ groundY: GROUND_Y });
+const water = createWater({ terrain });
+const atmos = createAtmos();
 const physics = createPhysics({ terrain, reduced: reducedMotion });
 terrain.attach(physics);
 const camera = createCamera(viewport, layer, { groundY: GROUND_Y, dots: $('[data-dots]'), onChange: () => { camDirty = true; } });
@@ -63,7 +70,7 @@ let camDirty = true;
 const byId = (id) => board?.items.find((i) => i.id === id);
 
 const elements = createElements({
-  physics, lights, camera, canvas: fxCanvas, els, sizes,
+  physics, lights, camera, canvas: fxCanvas, els, sizes, water, atmos,
   getItems: () => board?.items || [],
   getLinks: () => board?.links || [],
   api: {
@@ -74,6 +81,26 @@ const elements = createElements({
     toast: (m) => toast(m, 3200),
     sfx,
   },
+});
+
+const devices = createDevices({
+  physics, water, atmos, els, sfx,
+  getItems: () => board?.items || [],
+  getLinks: () => board?.links || [],
+  spawn: (p) => elements.spawn(p),
+  clockGet: () => world.clock.get(),
+});
+elements.setExtraDraw({ active: () => water.activeCount > 0, draw: (ctx, view, cam) => water.drawFront(ctx, view, cam, world.time) });
+elements.setPipeFlow(devices.isFlowing);
+world.systems.push({
+  tick(dt, worldMin, c) {
+    atmos.tick(dt, c, worldMin, world.weather);
+    world.weather.wind = atmos.wind;
+    water.tick(dt, c, worldMin);
+    // fresh snow on the ground melts above freezing
+    world.weather.snow = Math.max(0, Math.min(1, world.weather.snow + elements.takeSnow() * 0.0012 - (c.temp > 0 ? 0.00025 * (1 + c.temp / 5) * (1 + worldMin * 30) : 0)));
+  },
+  drawBack(ctx, view, cam) { water.drawBack(ctx, view, cam); devices.drawBack(ctx, view); },
 });
 
 const inspector = createInspector({
@@ -90,6 +117,8 @@ async function init() {
   const saved = loadBoard();
   board = normalize(saved || (DATA ? seedBoard(DATA) : { version: 3, gravity: 'on', items: [] }));
   world.load(board.world?.clock);
+  atmos.load(board.world?.atmos);
+  world.weather.snow = board.world?.snow || 0;
   await document.fonts?.ready;
   mountAll();
   physics.setGravity(board.gravity || 'on');
@@ -122,8 +151,9 @@ function serialize() {
     version: 3,
     gravity: physics.gravity,
     cam: camera.get(),
-    world: { wind: elements.world.wind, clock: world.clock.state },
+    world: { clock: world.clock.state, atmos: atmos.serialize(), snow: +world.weather.snow.toFixed(3) },
     terrain: terrain.serialize(),
+    water: water.serialize(),
     links: board.links,
     items: board.items.map(({ v, ...it }) => ({ ...it, x: +it.x.toFixed(1), y: +it.y.toFixed(1), a: +it.a.toFixed(4) })),
   }, (k, v) => (k.startsWith('_') ? undefined : v)));
@@ -171,8 +201,11 @@ function unmountAll() {
 function mountAll() {
   unmountAll();
   terrain.load(board.terrain);
+  water.load(board.water);
+  // v2 water pools become real ponds dug into the ground
+  for (const w of board.items.filter((i) => i.type === 'water')) water.pond(w.x - (w.d.w || 900) / 2, w.x + (w.d.w || 900) / 2, w.d.h || 220);
+  board.items = board.items.filter((i) => i.type !== 'water');
   syncGround(true);
-  elements.world.wind = board.world?.wind || 0;
   [...board.items].sort((a, b) => a.z - b.z).forEach(mountItem);
   board.links = (board.links || []).filter((l) => byId(l.a) && byId(l.b));
   board.links.forEach((l) => physics.addLink(l));
@@ -182,12 +215,21 @@ function addItem(item, { edit = false, quiet = false, inspect = false } = {}) {
   item.z = Math.max(0, ...board.items.map((i) => i.z)) + 1;
   board.items.push(item);
   mountItem(item);
+  if (ROOTED.has(item.type)) rootItem(item);
   select(item.id);
   if (!quiet) sfx.pop(1.1);
   commit();
   if (edit) startEdit(item);
   if (inspect) openInspector(item);
   return item;
+}
+/** Stand an item in the ground (bores, poles, sprinklers). */
+function rootItem(item) {
+  const s = sizes.get(item.id);
+  if (!s) return;
+  const y = terrain.surfaceY(item.x) - (s.h * item.s) / 2 + 6;
+  physics.moveTo(item.id, item.x, y);
+  physics.setAngle(item.id, 0);
 }
 function removeItem(id) {
   board.items = board.items.filter((i) => i.id !== id);
@@ -241,6 +283,8 @@ function loop(now) {
   syncGround();
   const moved = physics.step(dt);
   const elChanged = elements.update(dt, now);
+  devices.update(dt);
+  devices.flushPatches((it) => { const el = els.get(it.id); if (el) patch(el, it); });
   if (moved || camDirty) {
     for (const it of board.items) {
       const el = els.get(it.id), s = sizes.get(it.id);
@@ -399,9 +443,10 @@ function onTap(item, act) {
   clearTimeout(clickT);
   clickT = setTimeout(() => itemAction(item), hasTapAction(item) ? 240 : 0);
 }
-function hasTapAction(item) { return ['game', 'camera', 'ball', 'dice', 'spinner', 'extinguisher', 'cloud', 'fire', 'fan', 'duck', 'coin', 'sun', 'clock', 'plant'].includes(item.type); }
+function hasTapAction(item) { return ['bore', 'tap', 'sprinkler', 'game', 'camera', 'ball', 'dice', 'spinner', 'extinguisher', 'cloud', 'fire', 'fan', 'duck', 'coin', 'sun', 'clock', 'plant'].includes(item.type); }
 function itemAction(item) {
   if (!byId(item.id)) return;
+  if (devices.tap(item)) { patch(els.get(item.id), item); commit(); return; }
   switch (item.type) {
     case 'game': openGame(item.d.gameId); break;
     case 'camera': takeSnapshot(); break;
@@ -514,13 +559,14 @@ function eraseAt(pt) {
 function startLink(item, kind) {
   linking = { from: item.id, kind };
   viewport.classList.add('linking');
-  toast(`Now tap another item to ${kind === 'arrow' ? 'point the arrow at' : kind === 'tape' ? 'tape it to' : 'tie it to'}. (Esc to cancel)`, 3000);
+  toast(`Now tap another item to ${kind === 'arrow' ? 'point the arrow at' : kind === 'tape' ? 'tape it to' : kind === 'pipe' ? 'pipe water to' : 'tie it to'}. (Esc to cancel)`, 3000);
 }
 function finishLink(item) {
   const l = linking;
   linking = null;
   viewport.classList.remove('linking');
   if (!item || item.id === l.from) { toast('Cancelled.', 1000); return; }
+  if (l.kind === 'pipe' && !PIPE_TYPES.has(item.type)) { toast('Pipes connect bores, tanks, taps and sprinklers.', 2200); return; }
   const link = { id: `l${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, a: l.from, b: item.id, kind: l.kind };
   board.links.push(link);
   physics.addLink(link);
@@ -553,8 +599,12 @@ function itemActions(item) {
     ball: ['Bounce', () => itemAction(item)],
     fan: [item.d.on ? 'Turn off' : 'Turn on', () => { item.d.on = !item.d.on; done(); }],
     fire: [item.d.lit === false ? 'Light' : 'Extinguish', () => { item.d.lit === false ? elements.ignite(item) : elements.extinguish(item); done(); }],
-    water: [item.d.frozen ? 'Melt' : 'Freeze', () => { item.d.frozen ? elements.thawWater(item) : elements.freezeWater(item); done(); }],
     photo: ['Replace image…', () => { pendingImageFor = item; $('[data-file]').click(); }],
+    bore: (item.d.pump || 'hand') === 'hand' ? ['Pump', () => { devices.tap(item); }] : null,
+    tap: [item.d.on ? 'Close tap' : 'Open tap', () => { devices.tap(item); done(); }],
+    sprinkler: [item.d.on ? 'Turn off' : 'Turn on', () => { devices.tap(item); done(); }],
+    can: ['Fill up', () => { item.d.level = 1; done(); }],
+    bucket: ['Fill up', () => { item.d.level = 1; done(); }],
     card: item.d.email ? ['Copy email', () => cardAction(item, 'copy')] : null,
     cloud: item.d.mode === 'storm' ? ['⚡ Strike', () => elements.strike(item)] : null,
   }[t];
@@ -575,6 +625,7 @@ function itemActions(item) {
   A.push({ id: 'back', label: 'Send to back', icon: ICONS.back, run: () => { item.z = Math.min(...board.items.map((i) => i.z)) - 1; done(); place(el(), item, sizes.get(item.id).w, sizes.get(item.id).h); } });
   const hasLinks = board.links.some((l) => l.a === item.id || l.b === item.id);
   A.push({ id: 'tie', label: 'Connect', icon: ICONS.link, sub: [
+    ...(PIPE_TYPES.has(t) ? [{ label: 'Pipe to…', run: () => startLink(item, 'pipe') }, '-'] : []),
     { label: 'Tie with string to…', run: () => startLink(item, 'string') },
     { label: 'Tape to…', run: () => startLink(item, 'tape') },
     { label: 'Draw an arrow to…', run: () => startLink(item, 'arrow') },
@@ -683,7 +734,7 @@ function canvasEntries() {
     addItem(makeItem(type, p.x, type === 'water' ? groundAt(p.x, (d.h || 200) / 2) : Math.min(groundAt(p.x, 80), p.y), d, extra), opts);
   };
   const g = physics.gravity;
-  const w = elements.world.wind;
+  const wm = atmos.mode, wv = atmos.manual;
   const isDay = world.clock.get().isDay;
   return [
     { label: 'Add here', icon: ICONS.plus, sub: [
@@ -702,7 +753,8 @@ function canvasEntries() {
       { header: 'Gravity' },
       ...['on', 'low', 'off'].map((m) => ({ label: { on: 'Full gravity', low: 'Moon gravity', off: 'Zero gravity' }[m], checked: g === m, run: () => setGravity(m) })),
       '-', { header: 'Wind' },
-      ...[[0, 'Calm'], [0.5, 'Breeze →'], [-0.5, 'Breeze ←'], [1.5, 'Gale →']].map(([v, l]) => ({ label: l, checked: w === v, run: () => { elements.world.wind = v; commit(); toast(v ? `Wind: ${l}` : 'The wind dropped.', 1400); } })),
+      { label: 'Auto (seasons + weather)', checked: wm === 'auto', run: () => { atmos.setMode('auto'); commit(); toast('Wind follows the seasons and weather.', 1600); } },
+      ...[[0.001, 'Calm'], [1, 'Breeze →'], [-1, 'Breeze ←'], [3, 'Gale →'], [-3, 'Gale ←']].map(([v, l]) => ({ label: l, checked: wm === 'manual' && wv === v, run: () => { atmos.setMode('manual', v); commit(); toast(`Wind: ${l}`, 1400); } })),
       '-',
       { label: isDay ? 'Jump to night' : 'Jump to morning', run: () => toggleDay() },
       { label: world.clock.state.mode === 'sim' ? 'Back to real time' : 'Simulate time', run: () => { world.clock.setMode(world.clock.state.mode === 'sim' ? 'real' : 'sim'); paintTimebar(world.clock.get()); commit(); } },
@@ -711,6 +763,14 @@ function canvasEntries() {
     { label: 'Take a snapshot', icon: ICONS.camera, kbd: 'C', run: takeSnapshot },
     { label: 'Export board…', icon: ICONS.download, run: () => $('[data-export]').click() },
   ];
+}
+function digPond(x) {
+  water.pond(x - 420, x + 420, 230, 0.8);
+  syncGround(true);
+  physics.map.forEach((r) => { if (Math.abs(r.body.position.x - x) < 700) physics.thaw(r.item.id); });
+  sfx.splash();
+  commit();
+  toast('Dug a pond. Rain keeps it full; in the sun it slowly evaporates and soaks away.', 3200);
 }
 function toggleDay() {
   const day = world.clock.get().isDay;
@@ -736,7 +796,6 @@ function inspectorChange(item, key, v, live) {
   inspectorDirty = true;
   const el = els.get(item.id);
   if (key === '$s') { item.s = Math.max(0.3, Math.min(4, v)); delete item.pa; const s = sizes.get(item.id); physics.resize(item.id, s.w, s.h); place(el, item, s.w, s.h); return; }
-  if (key === 'frozen') { v ? elements.freezeWater(item) : elements.thawWater(item); return; }
   if (key === 'lit') { v ? elements.ignite(item) : elements.extinguish(item); return; }
   if (key === '$labels') item.d.labels = String(v).split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 10);
   else if (key === '$ink') item.d.strokes.forEach((st) => { st.color = v; });
@@ -845,7 +904,7 @@ const GALLERY = {
     { name: '❄ Snow cloud', svg: cloudSvg('snow'), type: 'cloud', d: { mode: 'snow', amount: 0.5 }, x: { s: 1.4 } },
     { name: '⛈ Storm cloud', svg: cloudSvg('storm'), type: 'cloud', d: { mode: 'storm', amount: 0.7 }, x: { s: 1.5 } },
     { name: '🔥 Campfire', svg: fireSvg(), type: 'fire', d: { lit: true, size: 1 } },
-    { name: '💧 Water pool', svg: W('<svg viewBox="0 0 100 60"><rect x="4" y="14" width="92" height="42" rx="6" fill="#bfe6ff" stroke="#111" stroke-width="3"/><path d="M4 22q11-8 23 0t23 0 23 0 23 0" fill="none" stroke="#4c9be8" stroke-width="4"/></svg>'), type: 'water', d: { w: 900, h: 200 } },
+    { name: '💧 Dig a pond', svg: W('<svg viewBox="0 0 100 60"><path d="M2 20 Q50 70 98 20" fill="#7a5233" stroke="#111" stroke-width="3"/><path d="M14 30 Q50 58 86 30Z" fill="#6fb7ff" stroke="#111" stroke-width="2"/></svg>'), type: '$pond' },
     { name: '🌀 Fan', svg: fanSvg(), type: 'fan', d: { on: true, power: 1, dir: 1 } },
     { name: '🧲 Magnet', svg: magnetSvg(), type: 'magnet', d: { strength: 1 } },
     { name: '🌸 Flower', svg: plantSvg('flower'), type: 'plant', d: { species: 'flower', growth: 0.4 } },
@@ -853,6 +912,20 @@ const GALLERY = {
     { name: '🌵 Cactus', svg: plantSvg('cactus'), type: 'plant', d: { species: 'cactus', growth: 0.5 } },
     { name: '💡 Lamp', svg: OBJECTS.lamp, type: 'lamp', d: { temp: 'warm' } },
     { name: '🔦 Torch', svg: OBJECTS.torch, type: 'torch', d: { beam: 0.42 }, x: { a: 0.3 } },
+  ],
+  Water: [
+    { name: '💧 Dig a pond', svg: '<svg viewBox="0 0 100 60"><path d="M2 20 Q50 70 98 20" fill="#7a5233" stroke="#111" stroke-width="3"/><path d="M14 30 Q50 58 86 30Z" fill="#6fb7ff" stroke="#111" stroke-width="2"/></svg>', type: '$pond' },
+    { name: 'Hand-pump bore', svg: boreSvg('hand'), type: 'bore', d: { pump: 'hand', depth: 900 } },
+    { name: 'Windmill bore', svg: boreSvg('wind'), type: 'bore', d: { pump: 'wind', depth: 900 } },
+    { name: 'Solar bore', svg: boreSvg('solar'), type: 'bore', d: { pump: 'solar', depth: 900 } },
+    { name: 'Water tank', svg: tankSvg(), type: 'tank', d: { level: 0 } },
+    { name: 'Sprinkler', svg: sprinklerSvg(), type: 'sprinkler', d: { on: true } },
+    { name: 'Tap', svg: tapSvg(), type: 'tap', d: { on: false } },
+    { name: 'Watering can', svg: canSvg(), type: 'can', d: { level: 1 } },
+    { name: 'Bucket', svg: bucketSvg(), type: 'bucket', d: { level: 0.6 } },
+    { name: 'Wind sock', svg: windsockSvg(), type: 'windsock' },
+    { name: 'Flag', svg: flagSvg(), type: 'flag' },
+    { name: 'Kite', svg: kiteSvg(), type: 'kite', tip: 'Tie it with string (right-click → Connect) and it flies in the wind.' },
   ],
   Toys: [
     { name: 'Bouncy ball', svg: OBJECTS.ball, type: 'ball' },
@@ -880,8 +953,11 @@ function placeEntry(e, at) {
   const p = at || viewCenter(e.type === 'cloud' ? -0.3 : -0.15);
   const d = JSON.parse(JSON.stringify(e.d || {}));
   if (e.type === 'spinner' && !d.labels && DATA) d.labels = DATA.games.map((g) => g.title.split(' ')[0]).slice(0, 6);
-  const y = e.type === 'water' ? groundAt(p.x, (d.h || 200) / 2) : Math.min(groundAt(p.x, 120), p.y);
+  if (e.type === '$pond') { digPond(p.x); return; }
+  const y = Math.min(groundAt(p.x, 120), p.y);
   addItem(makeItem(e.type, p.x + (at ? 0 : (Math.random() - 0.5) * 160), y, d, { ...(e.x || {}) }), { edit: !!e.edit, inspect: !!e.inspect });
+  if (e.tip) toast(e.tip, 3200);
+  if (PIPE_TYPES.has(e.type)) toast('Right-click → Connect → Pipe to… to join it to a bore, tank, tap or sprinkler.', 3600);
   if (e.type === 'cloud' && d.mode === 'storm') toast('Storm clouds strike lightning every few seconds. Tap one to strike now.');
 }
 let galleryAt = null;
@@ -921,7 +997,7 @@ function buildUI() {
     '|',
     ['cloud', ICONS.cloud, 'Rain cloud'],
     ['fire', ICONS.fire, 'Campfire'],
-    ['water', ICONS.water, 'Water pool'],
+    ['water', ICONS.water, 'Water & air: ponds, bores, pipes, tanks, sprinklers, kites…'],
     ['elements', ICONS.plant, 'More elements: snow, storm, fan, magnet, plants…'],
     ['shovel', ICONS.shovel, 'Shovel: sculpt hills, dig, paint sand / clay / rock (B)'],
     '|',
@@ -929,7 +1005,7 @@ function buildUI() {
   ];
   $('[data-tools]').innerHTML = tools.map((t) => (t === '|' ? '<i class="sep"></i>' : `<button type="button" data-tool="${t[0]}" title="${t[2]}" aria-label="${t[2]}">${t[1]}</button>`)).join('');
   const g = $('[data-gallery]');
-  g.innerHTML = `<div class="g-tabs" role="tablist">${['Stickers', 'Elements', 'Toys', 'Paper', 'Yours'].map((t) => `<button type="button" role="tab" data-tab="${t}">${t}</button>`).join('')}<button type="button" class="g-x" data-gclose aria-label="Close gallery">${ICONS.close}</button></div><div class="g-body"></div>`;
+  g.innerHTML = `<div class="g-tabs" role="tablist">${['Stickers', 'Elements', 'Water', 'Toys', 'Paper', 'Yours'].map((t) => `<button type="button" role="tab" data-tab="${t}">${t}</button>`).join('')}<button type="button" class="g-x" data-gclose aria-label="Close gallery">${ICONS.close}</button></div><div class="g-body"></div>`;
   $('[data-undo]').innerHTML = ICONS.undo; $('[data-redo]').innerHTML = ICONS.redo;
   $('[data-export]').innerHTML = ICONS.download; $('[data-import]').innerHTML = ICONS.upload;
   $('[data-reset]').innerHTML = ICONS.reset; $('[data-info]').innerHTML = ICONS.info;
@@ -965,7 +1041,7 @@ function buildUI() {
     if (t === 'camera') takeSnapshot();
     if (t === 'cloud') placeEntry(GALLERY.Elements[0]);
     if (t === 'fire') placeEntry(GALLERY.Elements[3]);
-    if (t === 'water') placeEntry(GALLERY.Elements[4]);
+    if (t === 'water') toggleGallery('Water');
   });
   g.addEventListener('pointerdown', (e) => e.stopPropagation());
   g.addEventListener('click', (e) => {
@@ -1001,13 +1077,14 @@ function buildUI() {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
-    try { board = normalize(await importFile(f)); world.load(board.world?.clock); mountAll(); physics.setGravity(board.gravity || 'on'); syncGravityUI(); if (board.cam) camera.set(board.cam); commit(); toast('Board imported.'); } catch { toast('That file is not a FewClicks board.'); }
+    try { board = normalize(await importFile(f)); world.load(board.world?.clock); atmos.load(board.world?.atmos); mountAll(); physics.setGravity(board.gravity || 'on'); syncGravityUI(); if (board.cam) camera.set(board.cam); commit(); toast('Board imported.'); } catch { toast('That file is not a FewClicks board.'); }
   });
   $('[data-reset]').addEventListener('click', () => {
     if (!confirm('Reset the board? Everything you added will be removed from this browser.')) return;
     clearBoard();
     board = normalize(seedBoard(DATA));
     world.load(board.world?.clock);
+    atmos.load(board.world?.atmos);
     mountAll();
     physics.setGravity('on');
     syncGravityUI();
@@ -1217,7 +1294,9 @@ function paintTimebar(c) {
   tb.querySelector('[data-tb-ic]').textContent = c.isDay ? (c.sunAltDeg < 8 ? '🌅' : '☀️') : moonIc;
   tb.querySelector('[data-tb-time]').textContent = c.label;
   const when = st.mode === 'sim' ? `Day ${c.day + 1}` : new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
-  tb.querySelector('[data-tb-meta]').textContent = `${when} · ${c.season} · ${Math.round(c.temp)}°C`;
+  const wl = atmos.label();
+  tb.querySelector('[data-tb-meta]').textContent = `${when} · ${c.season} · ${Math.round(c.temp)}°C · 💨 ${wl.kmh} km/h ${wl.arrow}`;
+  tb.querySelector('[data-tb-meta]').title = wl.name;
   tb.querySelector('[data-tb-mode]').textContent = st.mode === 'sim' ? 'SIM' : 'REAL';
   tb.querySelector('[data-tb-mode]').setAttribute('aria-pressed', String(st.mode === 'sim'));
   tb.querySelector('[data-tb-play]').innerHTML = st.mode === 'sim' && !st.paused ? '⏸' : '▶';
@@ -1286,6 +1365,6 @@ addEventListener('beforeunload', () => save(true));
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(true); });
 
 // test hook for local automated checks (only with ?debug in the URL; nothing leaves the browser)
-if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, world, terrain, get board() { return board; }, byId, select, commit };
+if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, world, terrain, water, atmos, devices, get board() { return board; }, byId, select, commit };
 
 init();

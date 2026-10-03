@@ -69,6 +69,10 @@ export function fieldsFor(item) {
     case 'plant': return [{ key: 'species', label: 'Plant', type: 'segment', options: [{ v: 'flower', l: 'Flower' }, { v: 'sunflower', l: 'Sunflower' }, { v: 'cactus', l: 'Cactus' }] }, { key: 'growth', label: 'Growth', type: 'range', min: 0.15, max: 1, step: 0.01 }, size];
     case 'lamp': return [{ key: 'temp', label: 'Light', type: 'segment', options: [{ v: 'warm', l: 'Warm' }, { v: 'white', l: 'White' }, { v: 'cool', l: 'Cool' }] }, size];
     case 'torch': return [{ key: 'beam', label: 'Beam width', type: 'range', min: 0.15, max: 0.9, step: 0.01 }, size];
+    case 'bore': return [{ key: 'pump', label: 'Pump', type: 'segment', options: [{ v: 'hand', l: '✋ Hand' }, { v: 'wind', l: '🌬 Windmill' }, { v: 'solar', l: '☀️ Solar' }] }, { key: 'depth', label: 'Bore depth', type: 'range', min: 300, max: 980, step: 10 }, size];
+    case 'tank': return [{ key: 'level', label: 'Water level', type: 'range', min: 0, max: 1, step: 0.01 }, size];
+    case 'sprinkler': case 'tap': return [{ key: 'on', label: item.type === 'tap' ? 'Open' : 'On', type: 'toggle' }, size];
+    case 'can': case 'bucket': return [{ key: 'level', label: 'Water', type: 'range', min: 0, max: 1, step: 0.01 }, size];
     case 'dice': return [{ key: 'face', label: 'Face', type: 'segment', options: [1, 2, 3, 4, 5, 6].map((v) => ({ v, l: String(v) })) }, size];
     case 'spinner': return [{ key: '$labels', label: 'Slices (one per line)', type: 'textarea' }, size];
     default: return [size];
@@ -76,7 +80,7 @@ export function fieldsFor(item) {
 }
 
 /** Keys that only need a cheap visual patch (no re-render / physics rebuild). */
-export const PATCH_KEYS = new Set(['lit', 'on', 'power', 'strength', 'growth', 'temp', 'beam', 'amount', 'dir']);
+export const PATCH_KEYS = new Set(['lit', 'on', 'power', 'strength', 'growth', 'temp', 'beam', 'amount', 'dir', 'level', 'depth']);
 
 export function createInspector({ onChange, onAction, onClose }) {
   const el = document.createElement('div');
@@ -115,7 +119,7 @@ export function createInspector({ onChange, onAction, onClose }) {
 
   function set(key, raw, live) {
     let v = raw;
-    if (['$s', 'size', 'amount', 'power', 'strength', 'growth', 'beam', 'w', 'h', '$width'].includes(key)) v = Number(raw);
+    if (['$s', 'size', 'amount', 'power', 'strength', 'growth', 'beam', 'w', 'h', '$width', 'level', 'depth'].includes(key)) v = Number(raw);
     if (['face', 'dir'].includes(key)) v = Number(raw);
     onChange(item, key, v, live);
   }

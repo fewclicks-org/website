@@ -3,6 +3,7 @@
 import { makeItem } from './items.js';
 import { packStrokes, demoHi } from './pen.js';
 import { createTerrain } from './world/terrain.js';
+import { createWater } from './world/water.js';
 
 /** The infinite canvas has one ground line; everything else is open space. */
 export const GROUND_Y = 3500;
@@ -56,8 +57,7 @@ export function seedBoard({ games, studio, team, news }) {
   add('text', 6900, 1700, { text: 'weather corner ↓', font: 'marker', size: 54 }, { a: -0.04 });
   add('cloud', 6450, 2150, { mode: 'rain', amount: 0.5 }, { s: 1.6 });
   add('plant', 6450, GROUND_Y - 60, { species: 'sunflower', growth: 0.45 });
-  add('water', 7300, GROUND_Y - 110, { w: 900, h: 220 });
-  add('duck', 7250, GROUND_Y - 260, {});
+  add('duck', 7300, GROUND_Y - 300, {});
   add('cloud', 7900, 2050, { mode: 'snow', amount: 0.4 }, { s: 1.3 });
   add('cloud', 8300, 1500, { mode: 'storm', amount: 0.7 }, { s: 1.5 });
   add('plant', 8500, GROUND_Y - 60, { species: 'cactus', growth: 0.6 });
@@ -78,9 +78,25 @@ export function seedBoard({ games, studio, team, news }) {
   const hi = packStrokes(demoHi().map((st) => ({ ...st, pts: st.pts.map(([x, y, p]) => [x + 4800, y + 560, p]) })));
   add('doodle', hi.x, hi.y, { strokes: hi.strokes, w: hi.w, h: hi.h });
 
+  // water: a windmill bore pumps groundwater → tank → sprinkler over the garden
+  const bore = add('bore', 5850, GROUND_Y - 94, { pump: 'wind', depth: 900 });
+  const tank = add('tank', 6080, GROUND_Y - 90, { level: 0.4 });
+  const spr = add('sprinkler', 6330, GROUND_Y - 58, { on: true });
+  add('windsock', 4950, GROUND_Y - 92, {});
+  const pole = add('flag', 2050, GROUND_Y - 92, {});
+  const kite = add('kite', 2350, 2300, {}, { a: 0.2 });
+  add('can', 6600, GROUND_Y - 60, { level: 0.8 });
+  const links = [
+    { id: 'lpipe1', a: bore.id, b: tank.id, kind: 'pipe' },
+    { id: 'lpipe2', a: tank.id, b: spr.id, kind: 'pipe' },
+    { id: 'lkite', a: pole.id, b: kite.id, kind: 'string', len: 900 },
+  ];
+
   items.forEach((it, i) => (it.z = i));
-  // rolling hills to the west, a sandy fire pit, a big hill far east with a rock outcrop
+
+  // rolling hills to the west, a sandy fire pit, a big hill far east with a rock outcrop, two ponds
   const t = createTerrain({ groundY: GROUND_Y });
+  const w = createWater({ terrain: t });
   t.hill(-5200, -900, 820);
   t.hill(-3000, -1700, 360);
   t.hill(9100, 12600, 1100);
@@ -88,5 +104,7 @@ export function seedBoard({ games, studio, team, news }) {
   t.paint('sand', -760, 560);
   t.paint('rock', 10400, 11000);
   t.paint('dirt', 6200, 6700);
-  return { version: 3, gravity: 'on', cam: null, world: { wind: 0, clock: { mode: 'real' } }, terrain: t.serialize(), links: [], items };
+  w.pond(6850, 7800, 260, 0.85);
+  w.pond(-2650, -2050, 120, 0.8);
+  return { version: 3, gravity: 'on', cam: null, world: { wind: 0, clock: { mode: 'real' } }, terrain: t.serialize(), water: w.serialize(), links, items };
 }
