@@ -5,6 +5,7 @@
 // open taps + sprinklers demand, tanks buffer the difference.
 
 import { PIPE_TYPES } from '../items.js';
+import { ANCHORS, anchorKey } from '../art.js';
 
 const TANK_CAP = 900; // water units a tank holds
 const CAN_CAP = 120;
@@ -15,17 +16,34 @@ export function createDevices({ physics, water, atmos, els, getItems, getLinks, 
   let acc = 0;
   const byId = (id) => getItems().find((i) => i.type && i.id === id);
 
-  function outlet(it) {
-    // world position of the device's spout
+  /**
+   * World position of an anchor ('spout', 'inlet', 'outlet') declared in the device art (viewBox units):
+   * art viewBox → rendered .obj box inside the item → item box (centred) → scale + rotation → world.
+   */
+  function anchorWorld(it, name) {
     const el = els.get(it.id);
-    const w = (el?.offsetWidth || 100) * it.s, h = (el?.offsetHeight || 100) * it.s;
-    const rot = (x, y) => ({ x: it.x + x * Math.cos(it.a) - y * Math.sin(it.a), y: it.y + x * Math.sin(it.a) + y * Math.cos(it.a) });
-    if (it.type === 'bore') return rot(w * 0.36, h * (it.d.pump === 'hand' || !it.d.pump ? 0.08 : 0.42));
-    if (it.type === 'tap') return rot(w * 0.36, h * 0.42);
-    if (it.type === 'can') return rot(w * 0.47, -h * 0.32);
-    if (it.type === 'bucket') return rot(w * 0.42, -h * 0.25);
-    if (it.type === 'tank') return rot(w * 0.5, h * 0.3);
-    return { x: it.x, y: it.y - h * 0.45 };
+    const A = ANCHORS[anchorKey(it)];
+    const obj = el?.querySelector('.obj');
+    if (!el || !A || !A[name] || !obj) return { x: it.x, y: it.y };
+    const [vw, vh] = A.vb;
+    const [ax, ay] = A[name];
+    const ow = obj.offsetWidth, oh = obj.offsetHeight || (ow * vh) / vw;
+    const lx = obj.offsetLeft + (ax / vw) * ow - el.offsetWidth / 2;
+    const ly = obj.offsetTop + (ay / vh) * oh - el.offsetHeight / 2;
+    const x = lx * it.s, y = ly * it.s, c = Math.cos(it.a), sn = Math.sin(it.a);
+    return { x: it.x + x * c - y * sn, y: it.y + x * sn + y * c };
+  }
+  const outlet = (it) => anchorWorld(it, 'spout');
+  /** Pipe port for a link end: water flows from bores/tanks (outlet) into tanks/taps/sprinklers (inlet). */
+  function portOf(it, other) {
+    if (it.type === 'bore') return { p: anchorWorld(it, 'outlet'), dir: [1, 0] };
+    if (it.type === 'tank') {
+      const feeds = other && (other.type === 'tap' || other.type === 'sprinkler');
+      return feeds ? { p: anchorWorld(it, 'outlet'), dir: [1, 0] } : { p: anchorWorld(it, 'inlet'), dir: [0, -1] };
+    }
+    if (it.type === 'tap') return { p: anchorWorld(it, 'inlet'), dir: [-1, 0] };
+    if (it.type === 'sprinkler') return { p: anchorWorld(it, 'inlet'), dir: [0, 1] };
+    return { p: { x: it.x, y: it.y }, dir: [0, 1] };
   }
 
   /** Spray / pour `n` water particles from a point. */
@@ -83,7 +101,7 @@ export function createDevices({ physics, water, atmos, els, getItems, getLinks, 
       if (tilt > (it.type === 'can' ? 0.45 : 1.1) && lvl > 0) {
         const p = outlet(it);
         const n = Math.max(1, Math.round((it.type === 'can' ? 1.5 : 4) * t60));
-        if (it.type === 'can') pour(p, n, Math.cos(it.a - 0.6) * 3, 1, 0.3); else pour(p, n, Math.cos(it.a) * 2, 2, 1);
+        if (it.type === 'can') pour(p, n, Math.cos(it.a - 0.6) * 3 + wind * 0.5, 1, 0.3); else pour(p, n, Math.cos(it.a) * 2 + wind * 0.5, 2, 1);
         it.d.level = Math.max(0, lvl - (n * 0.12) / cap * 1.4);
         markPatch(it);
       }
@@ -128,10 +146,10 @@ export function createDevices({ physics, water, atmos, els, getItems, getLinks, 
         if (s.type === 'sprinkler') {
           const ang = -Math.PI / 2 + Math.sin(s._sw || 0) * 0.9;
           for (let i = 0; i < Math.round(10 * f); i++) { const a = ang + (Math.random() - 0.5) * 0.5; const v = 9 + Math.random() * 4; spawn({ k: 'drip', x: p.x, y: p.y, vx: Math.cos(a) * v + wind * 0.4, vy: Math.sin(a) * v, life: 300 }); }
-        } else pour(p, Math.round(6 * f), 0, 2, 0.2);
+        } else pour(p, Math.round(6 * f), wind * 0.6, 2, 0.15);
       }
       // a bore with nothing connected pours from its own spout
-      if (g.items.length === 1 && bores.length === 1 && supply > 0) { const b = bores[0]; const p = outlet(b); pour(p, Math.round(supply * 1.2), 1.5, 1.5, 0.3); }
+      if (g.items.length === 1 && bores.length === 1 && supply > 0) { const b = bores[0]; const p = outlet(b); pour(p, Math.round(supply * 1.2), 0.3 + wind * 0.5, 1.5, 0.25); }
       if (!sinks.length && !tanks.length && bores.length === 1 && g.items.length > 1 && supply > 0) { /* pipe to nowhere */ }
       const any = supply > 0 || delivered > 0;
       if (any) g.links.forEach((l) => flowing.add(l));
@@ -156,7 +174,8 @@ export function createDevices({ physics, water, atmos, els, getItems, getLinks, 
     for (const it of getItems()) {
       if (it.type !== 'bore') continue;
       if (it.x < view.x - 200 || it.x > view.x + view.w + 200) continue;
-      const top = it.y + 60 * it.s, bottom = physics.groundY + (it.d.depth || 900);
+      const base = anchorWorld(it, 'outlet');
+      const top = base.y, bottom = physics.groundY + (it.d.depth || 900);
       const tbl = water.tableY(it.x);
       ctx.fillStyle = '#5d646c';
       ctx.fillRect(it.x - 12, top, 24, bottom - top);
@@ -177,5 +196,5 @@ export function createDevices({ physics, water, atmos, els, getItems, getLinks, 
     return false;
   }
 
-  return { update, drawBack, isFlowing, tap, outlet, flushPatches, TANK_CAP };
+  return { update, drawBack, isFlowing, tap, outlet, portOf, anchorWorld, flushPatches, TANK_CAP };
 }

@@ -35,7 +35,7 @@ export function createWorld({ skyCanvas, backCanvas, camera, terrain }) {
     return {
       mode: 'sun', minutes: 0, day: 0, yearFrac: 0,
       season: SEASONS[season], seasonIdx: season, seasonProgress: 0.5,
-      sunAlt: (altDeg * Math.PI) / 180, sunAltDeg: altDeg, noonAlt: 1.2, sunX, H: 0, H0: 1,
+      sunAlt: (altDeg * Math.PI) / 180, sunAltDeg: altDeg, noonAlt: 1.2, sunX, sunWX: sun ? sun.x : null, H: 0, H0: 1,
       moonAlt: -1, moonX: 0, phase: 0, illum: 0,
       temp, isDay: altDeg > -0.8, label: '',
       sun,

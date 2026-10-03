@@ -8,8 +8,8 @@ import { reducedMotion, coarsePointer } from '../../shared/js/motion.js';
 import { mountPrototypeBadge } from '../../shared/js/proto-badge.js';
 import { gameFacts } from '../../shared/js/kit.js';
 import {
-  STICKERS, STICKER_GROUPS, OBJECTS, ICONS, FONTS, cloudSvg, fireSvg, fanSvg, magnetSvg, plantSvg, diceSvg, clockSvg,
-  duckSvg, clipSvg, iceSvg, coinSvg, spinnerSvg, extinguisherSvg,
+  STICKERS, STICKER_GROUPS, OBJECTS, ICONS, FONTS, cloudSvg, fireSvg, fanSvg, magnetSvg, diceSvg, clockSvg,
+  duckSvg, clipSvg, iceSvg, coinSvg, spinnerSvg, extinguisherSvg, tw,
 } from './art.js';
 import { makeItem, renderItem, place, syncState, patch, label } from './items.js';
 import { createPhysics } from './physics.js';
@@ -24,6 +24,7 @@ import { snapshot, download } from './snapshot.js';
 import { loadBoard, saveBoard, clearBoard, createHistory, exportFile, importFile, compressImage } from './store.js';
 import { seedBoard, GROUND_Y, CENTER } from './seed.js';
 import { createTerrain } from './world/terrain.js';
+import { localShape, traceItem, artKey } from './shapes.js';
 import { createWorld } from './world/world.js';
 import { createWater } from './world/water.js';
 import { createAtmos } from './world/atmos.js';
@@ -31,7 +32,7 @@ import { createDevices } from './world/pipes.js';
 import { createFlora } from './world/flora.js';
 import { createFire } from './world/fire.js';
 import { createWeather, STATES as WEATHER } from './world/weather.js';
-import { SPECIES, SPECIES_CATS, SPECIES_ICON } from './world/species.js';
+import { SPECIES, SPECIES_CATS } from './world/species.js';
 import { boreSvg, tankSvg, sprinklerSvg, tapSvg, canSvg, bucketSvg, windsockSvg, flagSvg, kiteSvg } from './art.js';
 import { PIPE_TYPES, ROOTED } from './items.js';
 
@@ -61,7 +62,7 @@ const TEXTY = new Set(['text', 'title', 'note', 'bubble']);
 const terrain = createTerrain({ groundY: GROUND_Y });
 const water = createWater({ terrain });
 const atmos = createAtmos();
-const physics = createPhysics({ terrain, reduced: reducedMotion });
+const physics = createPhysics({ terrain, reduced: reducedMotion, shapeOf: localShape });
 terrain.attach(physics);
 const camera = createCamera(viewport, layer, { groundY: GROUND_Y, dots: $('[data-dots]'), onChange: () => { camDirty = true; } });
 const lights = createLights(lightCanvas);
@@ -101,14 +102,17 @@ const fire = createFire({ terrain, water, flora, spawn: (p) => elements.spawn(p)
 const weather = createWeather({ terrain, camera, spawn: (p) => elements.spawn(p), strikeAt: (x, y) => elements.strikeAt(x, y) });
 elements.setExtraDraw({ active: () => water.activeCount > 0, draw: (ctx, view, cam) => water.drawFront(ctx, view, cam, world.time) });
 elements.setPipeFlow(devices.isFlowing);
+elements.setPipePort(devices.portOf);
+water.setWind((x, y) => elements.windAt(x, y));
+// plants grow only from water reaching their roots (rain, drips, sprinklers, the watering can, puddles)
+let floraDirty = false;
+water.onAdd((x, a) => { if (flora.waterAt(x, a)) floraDirty = true; });
 world.systems.push({
   tick(dt, worldMin, c) {
     weather.tick(dt, worldMin, c, world.weather);
     atmos.tick(dt, c, worldMin, world.weather);
-    flora.tick(dt, worldMin, c, world.weather);
+    flora.tick(dt);
     fire.tick(dt, c, atmos.wind, world.weather);
-    // rain where we don't draw drops: soak the soil under plants directly
-    if (world.weather.rain > 0 && worldMin > 0) { const v = camera.viewRect(); for (const p of flora.list) if (p.x < v.x || p.x > v.x + v.w) water.soak(p.x, world.weather.rain * worldMin * 0.0008); }
     if (world.weather.snowing > 0 && worldMin > 0) world.weather.snow = Math.min(1, (world.weather.snow || 0) + world.weather.snowing * worldMin * 0.0006);
     world.weather.wind = atmos.wind;
     water.tick(dt, c, worldMin);
@@ -144,7 +148,7 @@ async function init() {
   else startView();
   if (!saved) {
     physics.settle(reducedMotion ? 400 : 30);
-    toast('Welcome! Drag things from the toolbar onto the board. Right-click (or long-press) anything for more.', 5200);
+    toast('Welcome! Open a list on the left and drag things onto the board. Right-click (or long-press) anything for more.', 5200);
   } else if (reducedMotion) physics.settle(200);
   history.push(serialize());
   syncHistoryUI();
@@ -156,6 +160,9 @@ function normalize(b) {
   b.world = b.world || { wind: 0 };
   // the sun is a draggable item: higher = brighter, none = night
   if (!b.items.some((i) => i.type === 'sun') && !b.world.night) b.items.push(makeItem('sun', CENTER.x, 330, {}, { s: 1.4, z: 0 }));
+  // old potted plants are planted in the ground now
+  b.flora = b.flora || [];
+  b.items = b.items.filter((i) => { if (i.type !== 'plant') return true; b.flora.push([{ cactus: 'palm', flower: 'tulip' }[i.d?.species] || 'sunflower', Math.round(i.x), Math.max(0.1, i.d?.growth || 0.3), Math.random(), 0]); return false; });
   return b;
 }
 function startView() {
@@ -199,8 +206,18 @@ function mountItem(item) {
   physics.add(item, w, h);
   place(el, item, w, h);
   syncState(el, item);
-  el.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => remeasure(item), { once: true }));
+  el.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => { remeasure(item); shapeLater(item); }, { once: true }));
+  shapeLater(item);
   return el;
+}
+/** Trace the picture's outline (once per art) and rebuild bodies so physics + water follow the real shape. */
+function shapeLater(item) {
+  const el = els.get(item.id);
+  if (!el || !artKey(item)) return;
+  requestAnimationFrame(() => traceItem(item, el, () => {
+    const key = artKey(item);
+    for (const it of board.items) if (artKey(it) === key) { const s = sizes.get(it.id); if (s) physics.resize(it.id, s.w, s.h); }
+  }));
 }
 function remeasure(item) {
   const el = els.get(item.id);
@@ -310,6 +327,8 @@ function loop(now) {
   {
     const v = camera.viewRect();
     flora.particles(v, world.clock.get(), atmos.wind, Math.min(3, dt / 16.667));
+    pourCan(dt);
+    if (floraDirty && frame % 90 === 0) { floraDirty = false; save(); }
     fire.emit(v, Math.min(3, dt / 16.667));
     if (frame % 10 === 0) world.weather.lights = fire.lights(v);
   }
@@ -369,8 +388,7 @@ viewport.addEventListener('pointerdown', (e) => {
 
   if (linking) { finishLink(item); return; }
 
-  // seed bag: plant the chosen species where you tap
-  if (tool === 'seed' && !palmTouch(e)) { plantAt(pt.x, seedSel); return; }
+  // a tap on empty space shows plant info
   if (!item && tool === 'select') emptyDown = { x: e.clientX, y: e.clientY, t: performance.now(), pt };
   // shovel: sculpt the terrain (pressure-sensitive with a pen)
   if (tool === 'shovel' && !palmTouch(e)) {
@@ -769,19 +787,17 @@ function canvasEntries() {
       { label: 'Card', icon: ICONS.card, run: at('card', { title: 'New card', body: 'Double-click to edit me.', style: 'white' }, {}, { inspect: true }) },
       { label: 'Speech bubble', icon: ICONS.bubble, run: at('bubble', { text: 'Hi!' }, {}, { edit: true }) },
       { label: 'Photo…', icon: ICONS.photo, run: () => { pendingImageFor = null; $('[data-file]').click(); } },
-      { label: 'Gallery…', icon: ICONS.gallery, run: () => openGallery('Stickers', menuPoint) },
+      { label: 'Gallery…', icon: ICONS.gallery, run: () => openList('stickers', menuPoint) },
     ] },
     { label: 'Elements', icon: ICONS.cloud, sub: GALLERY.Elements.map((e) => ({ label: e.name, run: () => placeEntry(e, menuPoint) })) },
     { label: 'Toys', icon: ICONS.ball, sub: GALLERY.Toys.map((e) => ({ label: e.name, run: () => placeEntry(e, menuPoint) })) },
-    { label: 'Plant here', icon: ICONS.plant, sub: SPECIES_CATS.map((cat) => ({ label: cat, sub: Object.entries(SPECIES).filter(([, d]) => d.cat === cat).map(([k, d]) => ({ label: `${SPECIES_ICON[k] || '🌱'} ${d.name}`, run: () => plantAt((menuPoint || viewCenter()).x, k) })) })) },
+    { label: 'Plant here', icon: ICONS.plant, sub: SPECIES_CATS.map((cat) => ({ label: cat, sub: Object.entries(SPECIES).filter(([, d]) => d.cat === cat).map(([k, d]) => ({ label: d.name, run: () => plantAt((menuPoint || viewCenter()).x, k) })) })) },
     { label: 'Start a fire here', icon: ICONS.fire, run: () => { const x = (menuPoint || viewCenter()).x; if (!fire.ignite(x, 2, world.clock.get(), world.weather.snow || 0)) toast('Too wet or nothing to burn here.', 1800); } },
     { label: 'Paste', icon: ICONS.paste, kbd: 'Ctrl+V', disabled: !clip, run: () => pasteAt(menuPoint || viewCenter()) },
     '-',
     { label: 'World', icon: ICONS.world, sub: [
       { header: 'Season' },
       ...['🌸 Spring', '☀️ Summer', '🍂 Autumn', '❄️ Winter'].map((l, i) => ({ label: l, checked: world.clock.season === i, run: () => { world.clock.setSeason(i); toast(l, 1200); commit(); } })),
-      { header: 'Nature speed' },
-      ...[[0, 'Paused'], [1, 'Normal'], [10, 'Fast ×10'], [60, 'Very fast ×60']].map(([v, l]) => ({ label: l, checked: world.clock.speed === v, run: () => { world.clock.setSpeed(v); toast(`Plants, water and fire: ${l.toLowerCase()}`, 1600); commit(); } })),
       '-',
       { header: 'Gravity' },
       ...['on', 'low', 'off'].map((m) => ({ label: { on: 'Full gravity', low: 'Moon gravity', off: 'Zero gravity' }[m], checked: g === m, run: () => setGravity(m) })),
@@ -927,41 +943,39 @@ async function takeSnapshot() {
   }
 }
 
-// ---------------- gallery (stickers, elements, toys, paper, your uploads) ----------------
-const W = (svg) => svg;
+// ---------------- sidebar lists (one list per toolbar button) ----------------
+const POND_SVG = '<svg viewBox="0 0 100 60"><path d="M2 22 Q50 70 98 22" fill="#c1694f"/><path d="M14 30 Q50 58 86 30Z" fill="#55acee"/><path d="M26 34 Q50 48 74 34" fill="none" stroke="#bbddf5" stroke-width="3" stroke-linecap="round"/></svg>';
 const GALLERY = {
   Elements: [
-    { name: '🌧 Rain cloud', svg: cloudSvg('rain'), type: 'cloud', d: { mode: 'rain', amount: 0.6 }, x: { s: 1.4 } },
-    { name: '❄ Snow cloud', svg: cloudSvg('snow'), type: 'cloud', d: { mode: 'snow', amount: 0.5 }, x: { s: 1.4 } },
-    { name: '⛈ Storm cloud', svg: cloudSvg('storm'), type: 'cloud', d: { mode: 'storm', amount: 0.7 }, x: { s: 1.5 } },
-    { name: '🔥 Campfire', svg: fireSvg(), type: 'fire', d: { lit: true, size: 1 } },
-    { name: '💧 Dig a pond', svg: W('<svg viewBox="0 0 100 60"><path d="M2 20 Q50 70 98 20" fill="#7a5233" stroke="#111" stroke-width="3"/><path d="M14 30 Q50 58 86 30Z" fill="#6fb7ff" stroke="#111" stroke-width="2"/></svg>'), type: '$pond' },
-    { name: '🌀 Fan', svg: fanSvg(), type: 'fan', d: { on: true, power: 1, dir: 1 } },
-    { name: '🧲 Magnet', svg: magnetSvg(), type: 'magnet', d: { strength: 1 } },
-    { name: '🌸 Flower', svg: plantSvg('flower'), type: 'plant', d: { species: 'flower', growth: 0.4 } },
-    { name: '🌻 Sunflower', svg: plantSvg('sunflower'), type: 'plant', d: { species: 'sunflower', growth: 0.4 } },
-    { name: '🌵 Cactus', svg: plantSvg('cactus'), type: 'plant', d: { species: 'cactus', growth: 0.5 } },
-    { name: '☀️ Sun', svg: OBJECTS.sun, type: 'sun', d: {}, x: { s: 1.4 } },
-    { name: '💡 Lamp', svg: OBJECTS.lamp, type: 'lamp', d: { temp: 'warm' } },
-    { name: '🔦 Torch', svg: OBJECTS.torch, type: 'torch', d: { beam: 0.42 }, x: { a: 0.3 } },
+    { name: 'Sun', svg: OBJECTS.sun, type: 'sun', d: {}, x: { s: 1.4 } },
+    { name: 'Lamp', svg: OBJECTS.lamp, type: 'lamp', d: { temp: 'warm' } },
+    { name: 'Torch', svg: OBJECTS.torch, type: 'torch', d: { beam: 0.42 }, x: { a: 0.3 } },
+    { name: 'Rain cloud', svg: cloudSvg('rain'), type: 'cloud', d: { mode: 'rain', amount: 0.6 }, x: { s: 1.4 } },
+    { name: 'Snow cloud', svg: cloudSvg('snow'), type: 'cloud', d: { mode: 'snow', amount: 0.5 }, x: { s: 1.4 } },
+    { name: 'Storm cloud', svg: cloudSvg('storm'), type: 'cloud', d: { mode: 'storm', amount: 0.7 }, x: { s: 1.5 } },
+    { name: 'Campfire', svg: fireSvg(), type: 'fire', d: { lit: true, size: 1 } },
+    { name: 'Magnet', svg: magnetSvg(), type: 'magnet', d: { strength: 1 } },
   ],
   Water: [
-    { name: '💧 Dig a pond', svg: '<svg viewBox="0 0 100 60"><path d="M2 20 Q50 70 98 20" fill="#7a5233" stroke="#111" stroke-width="3"/><path d="M14 30 Q50 58 86 30Z" fill="#6fb7ff" stroke="#111" stroke-width="2"/></svg>', type: '$pond' },
+    { name: 'Watering can', svg: canSvg(), type: '$can', tip: 'Drag the can over your plants: it pours while you hold it.' },
+    { name: 'Dig a pond', svg: POND_SVG, type: '$pond' },
     { name: 'Hand-pump bore', svg: boreSvg('hand'), type: 'bore', d: { pump: 'hand', depth: 900 } },
     { name: 'Windmill bore', svg: boreSvg('wind'), type: 'bore', d: { pump: 'wind', depth: 900 } },
     { name: 'Solar bore', svg: boreSvg('solar'), type: 'bore', d: { pump: 'solar', depth: 900 } },
     { name: 'Water tank', svg: tankSvg(), type: 'tank', d: { level: 0 } },
-    { name: 'Sprinkler', svg: sprinklerSvg(), type: 'sprinkler', d: { on: true } },
     { name: 'Tap', svg: tapSvg(), type: 'tap', d: { on: false } },
-    { name: 'Watering can', svg: canSvg(), type: 'can', d: { level: 1 } },
+    { name: 'Sprinkler', svg: sprinklerSvg(), type: 'sprinkler', d: { on: true } },
     { name: 'Bucket', svg: bucketSvg(), type: 'bucket', d: { level: 0.6 } },
+  ],
+  Air: [
+    { name: 'Fan', svg: fanSvg(), type: 'fan', d: { on: true, power: 1, dir: 1 } },
     { name: 'Wind sock', svg: windsockSvg(), type: 'windsock' },
     { name: 'Flag', svg: flagSvg(), type: 'flag' },
     { name: 'Kite', svg: kiteSvg(), type: 'kite', tip: 'Tie it with string (right-click → Connect) and it flies in the wind.' },
+    { name: 'Balloon', svg: OBJECTS.balloon, type: 'balloon' },
   ],
   Toys: [
     { name: 'Bouncy ball', svg: OBJECTS.ball, type: 'ball' },
-    { name: 'Balloon', svg: OBJECTS.balloon, type: 'balloon' },
     { name: 'Dice', svg: diceSvg(5), type: 'dice', d: { face: 5 } },
     { name: 'Rubber duck', svg: duckSvg(), type: 'duck' },
     { name: 'Spinner wheel', svg: spinnerSvg(['A', 'B', 'C', 'D', 'E', 'F']), type: 'spinner', d: {} },
@@ -973,6 +987,7 @@ const GALLERY = {
     { name: 'Instant camera', svg: OBJECTS.camera, type: 'camera' },
   ],
   Paper: [
+    { name: 'Text', html: '<span class="mini-txt">Aa</span>', type: 'text', d: { text: 'Your text', font: 'marker', size: 56 }, edit: true },
     ...['classic', 'lined', 'grid', 'torn', 'index', 'black'].map((p) => ({ name: `${p[0].toUpperCase()}${p.slice(1)} note`, html: `<span class="mini-note p-${p}"></span>`, type: 'note', d: { text: 'Write something…', paper: p }, edit: true })),
     { name: 'White card', html: '<span class="mini-card white">Card</span>', type: 'card', d: { title: 'New card', body: 'Double-click to edit me.', style: 'white' }, inspect: true },
     { name: 'Black card', html: '<span class="mini-card">Card</span>', type: 'card', d: { title: 'New card', body: 'Double-click to edit me.', style: 'black' }, inspect: true },
@@ -981,11 +996,22 @@ const GALLERY = {
     ...['bubbles', 'neon', 'pixel', 'script', 'bungee', 'outline'].map((f) => ({ name: `${FONTS.find((x) => x.id === f).name} text`, html: `<span class="mini-txt" style="font-family:${FONTS.find((x) => x.id === f).family}">Aa</span>`, type: 'text', d: { text: 'Your text', font: f, size: 64 }, edit: true })),
   ],
 };
+const LISTS = {
+  paper: { title: 'Paper & text', icon: ICONS.note, tab: 'Paper' },
+  stickers: { title: 'Stickers', icon: ICONS.sticker },
+  elements: { title: 'Elements', icon: ICONS.fire, tab: 'Elements' },
+  water: { title: 'Water', icon: ICONS.water, tab: 'Water' },
+  air: { title: 'Air & wind', icon: ICONS.fan, tab: 'Air' },
+  toys: { title: 'Toys', icon: ICONS.ball, tab: 'Toys' },
+  plants: { title: 'Plants', icon: ICONS.plant },
+  yours: { title: 'Your photos', icon: ICONS.photo },
+};
 function placeEntry(e, at) {
   const p = at || viewCenter(e.type === 'cloud' ? -0.3 : -0.15);
   const d = JSON.parse(JSON.stringify(e.d || {}));
   if (e.type === 'spinner' && !d.labels && DATA) d.labels = DATA.games.map((g) => g.title.split(' ')[0]).slice(0, 6);
   if (e.type === '$pond') { digPond(p.x); return; }
+  if (e.type === '$can') { toast(e.tip, 2600); return; }
   if (e.type === 'sun' && board.items.some((i) => i.type === 'sun')) { const s0 = board.items.find((i) => i.type === 'sun'); physics.moveTo(s0.id, p.x, Math.min(groundAt(p.x, 200), p.y)); select(s0.id); toast('There is only one sun: moved it here. Higher = brighter.'); commit(); return; }
   const y = Math.min(groundAt(p.x, 120), p.y);
   addItem(makeItem(e.type, p.x + (at ? 0 : (Math.random() - 0.5) * 160), y, d, { ...(e.x || {}) }), { edit: !!e.edit, inspect: !!e.inspect });
@@ -994,24 +1020,38 @@ function placeEntry(e, at) {
   if (e.type === 'cloud' && d.mode === 'storm') toast('Storm clouds strike lightning every few seconds. Tap one to strike now.');
 }
 let galleryAt = null;
-function openGallery(tab = 'Stickers', at = null) {
+let openListName = null;
+function openList(name, at = null) {
   galleryAt = at;
   const g = $('[data-gallery]');
   g.hidden = false;
-  showTab(tab);
+  openListName = name;
+  document.querySelectorAll('[data-list]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.list === name)));
+  g.setAttribute('aria-label', LISTS[name].title);
+  g.querySelector('[data-gtitle]').textContent = LISTS[name].title;
+  showList(name);
 }
-function showTab(tab) {
-  const g = $('[data-gallery]');
-  g.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
-  const body = g.querySelector('.g-body');
-  if (tab === 'Stickers') {
-    body.innerHTML = Object.entries(STICKER_GROUPS).map(([name, keys]) => `<h4>${name}</h4><div class="g-grid">${keys.map((k) => `<button type="button" data-stk="${k}" aria-label="${k} sticker" title="${k}">${STICKERS[k]}</button>`).join('')}</div>`).join('');
-  } else if (tab === 'Yours') {
+function closeList() {
+  $('[data-gallery]').hidden = true;
+  openListName = null;
+  document.querySelectorAll('[data-list]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+}
+function toggleList(name) { if (openListName === name && !$('[data-gallery]').hidden) closeList(); else openList(name); }
+function showList(name) {
+  const body = $('[data-gallery] .g-body');
+  body.scrollTop = 0;
+  const hint = '<p class="g-note">Drag onto the board.</p>';
+  if (name === 'stickers') {
+    body.innerHTML = Object.entries(STICKER_GROUPS).map(([n, keys]) => `<h4>${n}</h4><div class="g-grid">${keys.map((k) => `<button type="button" data-stk="${k}" aria-label="${k} sticker" title="${k}">${STICKERS[k]}</button>`).join('')}</div>`).join('');
+  } else if (name === 'yours') {
     const srcs = [...new Set(board.items.filter((i) => (i.type === 'photo') && /^data:/.test(i.d.src || '')).map((i) => i.d.src))];
-    body.innerHTML = `<p class="g-note">Photos you added live only in this browser.</p><div class="g-grid wide"><button type="button" class="g-up" data-upload>${ICONS.photo}<span>Add photo</span></button>${srcs.map((s, i) => `<button type="button" data-reuse="${i}" aria-label="Your photo ${i + 1}"><img src="${s}" alt=""></button>`).join('')}</div>`;
+    body.innerHTML = `<p class="g-note">Photos you add live only in this browser.</p><div class="g-grid wide"><button type="button" class="g-up" data-upload>${ICONS.photo}<span>Add photo</span></button>${srcs.map((s, i) => `<button type="button" data-reuse="${i}" aria-label="Your photo ${i + 1}"><img src="${s}" alt=""></button>`).join('')}</div>`;
     body._srcs = srcs;
+  } else if (name === 'plants') {
+    body.innerHTML = `<p class="g-note">Drag a plant onto the ground, then water it with the watering can (Water list) or rain. Plants only grow when watered.</p>${SPECIES_CATS.map((cat) => `<h4>${cat}</h4><div class="g-grid labeled">${Object.entries(SPECIES).filter(([, d]) => d.cat === cat).map(([k, d]) => `<button type="button" data-plant="${k}" title="${esc(d.name)}"><span class="g-art">${tw(d.sprite)}</span><span class="g-l">${esc(d.name)}</span></button>`).join('')}</div>`).join('')}`;
   } else {
-    body.innerHTML = `<div class="g-grid labeled">${GALLERY[tab].map((e, i) => `<button type="button" data-entry="${tab}:${i}" title="${esc(e.name)}"><span class="g-art">${e.svg || e.html}</span><span class="g-l">${esc(e.name)}</span></button>`).join('')}</div>`;
+    const tab = LISTS[name].tab;
+    body.innerHTML = `${hint}<div class="g-grid labeled">${GALLERY[tab].map((e, i) => `<button type="button" data-entry="${tab}:${i}" title="${esc(e.name)}"${e.type === '$can' ? ' data-can' : ''}><span class="g-art">${e.svg || e.html}</span><span class="g-l">${esc(e.name)}</span></button>`).join('')}</div>`;
   }
 }
 
@@ -1021,25 +1061,12 @@ function buildUI() {
     ['select', '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l14 8-6 2-3 6z"/></svg>', 'Select & toss (V)'],
     ['hand', ICONS.hand, 'Pan (H or hold Space)'],
     ['pen', ICONS.pen, 'Draw & write (D) · works with pen tablets'],
-    '|',
-    ['text', ICONS.text, 'Text: drag it onto the board (T)'],
-    ['note', ICONS.note, 'Sticky note: drag it onto the board (N)'],
-    ['card', ICONS.card, 'Card: drag it onto the board (K)'],
-    ['gallery', ICONS.sticker, 'Gallery: stickers, elements, toys (G)'],
-    ['photo', ICONS.photo, 'Your photo: drag onto the board, then pick a picture'],
-    '|',
-    ['cloud', ICONS.cloud, 'Rain cloud: drag it onto the board'],
-    ['fire', ICONS.fire, 'Campfire: drag it onto the board'],
-    ['water', ICONS.water, 'Water & air: ponds, bores, pipes, tanks, sprinklers, kites…'],
-    ['elements', ICONS.plant, 'More elements: snow, storm, fan, magnet, plants…'],
-    ['seed', ICONS.seed, 'Seed bag: plant trees, flowers, crops… (Y)'],
     ['shovel', ICONS.shovel, 'Shovel: sculpt hills, dig, paint sand / clay / rock (B)'],
-    '|',
-    ['camera', ICONS.camera, 'Camera snapshot (C)'],
   ];
-  $('[data-tools]').innerHTML = tools.map((t) => (t === '|' ? '<i class="sep"></i>' : `<button type="button" data-tool="${t[0]}" title="${t[2]}" aria-label="${t[2]}">${t[1]}</button>`)).join('');
+  const btn = (t) => `<button type="button" data-tool="${t[0]}" title="${t[2]}" aria-label="${t[2]}">${t[1]}</button>`;
+  $('[data-tools]').innerHTML = `${tools.map(btn).join('')}<i class="sep"></i>${Object.entries(LISTS).map(([k, l]) => `<button type="button" data-list="${k}" title="${l.title}" aria-label="${l.title}" aria-pressed="false">${l.icon}</button>`).join('')}<i class="sep"></i>${btn(['camera', ICONS.camera, 'Camera snapshot (C)'])}`;
   const g = $('[data-gallery]');
-  g.innerHTML = `<div class="g-tabs" role="tablist">${['Stickers', 'Elements', 'Water', 'Toys', 'Paper', 'Yours'].map((t) => `<button type="button" role="tab" data-tab="${t}">${t}</button>`).join('')}<button type="button" class="g-x" data-gclose aria-label="Close gallery">${ICONS.close}</button></div><div class="g-body"></div>`;
+  g.innerHTML = `<div class="g-head"><b data-gtitle></b><button type="button" class="g-x" data-gclose aria-label="Close list">${ICONS.close}</button></div><div class="g-body"></div>`;
   $('[data-undo]').innerHTML = ICONS.undo; $('[data-redo]').innerHTML = ICONS.redo;
   $('[data-export]').innerHTML = ICONS.download; $('[data-import]').innerHTML = ICONS.upload;
   $('[data-reset]').innerHTML = ICONS.reset; $('[data-info]').innerHTML = ICONS.info;
@@ -1052,7 +1079,6 @@ function buildUI() {
   snd.addEventListener('click', toggleSound);
   buildPenBar();
   buildShovelBar();
-  buildSeedBar();
   $('[data-ink-toggle]').innerHTML = ICONS.palette;
   $('[data-ink-toggle]').addEventListener('click', () => { setInk(!document.body.classList.contains('ink')); sfx.click(); toast(document.body.classList.contains('ink') ? 'Ink world: all color removed.' : 'Color world.', 1400); });
   try { setInk(localStorage.getItem('fewclicks:ink') === '1'); } catch { /* ignore */ }
@@ -1060,15 +1086,14 @@ function buildUI() {
   mountPrototypeBadge(11, 'Whiteboard');
 
   $('[data-tools]').addEventListener('click', (e) => {
+    const lb = e.target.closest('[data-list]');
+    if (lb) { sfx.click(); toggleList(lb.dataset.list); return; }
     const b = e.target.closest('[data-tool]');
     if (!b) return;
     sfx.click();
     const t = b.dataset.tool;
-    if (['select', 'hand', 'pen', 'shovel', 'seed'].includes(t)) { setTool(t); return; }
-    if (t === 'gallery') toggleGallery('Stickers');
-    if (t === 'elements') toggleGallery('Elements');
+    if (['select', 'hand', 'pen', 'shovel'].includes(t)) { setTool(t); return; }
     if (t === 'camera') takeSnapshot();
-    if (t === 'water') toggleGallery('Water');
     if (DRAG_TOOLS.has(t)) {
       // things are placed by dragging them onto the board; Enter/Space (keyboard) drops at the centre
       if (e.detail === 0) toolPlace(t, null);
@@ -1081,15 +1106,15 @@ function buildUI() {
   });
   g.addEventListener('pointerdown', (e) => {
     e.stopPropagation();
-    const src = e.target.closest('[data-stk], [data-entry], [data-reuse]');
-    if (src) startDrag(e, src, (at) => galleryPlace(src, at));
+    const src = e.target.closest('[data-stk], [data-entry], [data-reuse], [data-plant]');
+    if (!src) return;
+    if (src.matches('[data-can]')) startDrag(e, src, null, { can: true, ghost: `<span class="can-ghost">${canSvg()}</span>` });
+    else startDrag(e, src, (at) => galleryPlace(src, at));
   });
   g.addEventListener('click', (e) => {
-    const tab = e.target.closest('[data-tab]');
-    if (tab) { showTab(tab.dataset.tab); return; }
-    if (e.target.closest('[data-gclose]')) { g.hidden = true; return; }
+    if (e.target.closest('[data-gclose]')) { closeList(); return; }
     if (e.target.closest('[data-upload]')) { pendingImageFor = null; pendingPhotoAt = null; $('[data-file]').click(); return; }
-    const src = e.target.closest('[data-stk], [data-entry], [data-reuse]');
+    const src = e.target.closest('[data-stk], [data-entry], [data-reuse], [data-plant]');
     if (!src) return;
     if (e.detail === 0) galleryPlace(src, galleryAt);
     else if (!dndJustDropped()) dragHint(src);
@@ -1099,6 +1124,7 @@ function buildUI() {
     const stk = src.matches('[data-stk]') ? src : null;
     const en = src.matches('[data-entry]') ? src : null;
     const re = src.matches('[data-reuse]') ? src : null;
+    if (src.matches('[data-plant]')) { plantAt((at || viewCenter()).x, src.dataset.plant); return; }
     if (stk) { const c = at || viewCenter(-0.38); addItem(makeItem('sticker', c.x + (at ? 0 : (Math.random() - 0.5) * 300), Math.min(groundAt(c.x, 100), c.y), { key: stk.dataset.stk }, { a: (Math.random() - 0.5) * 0.6 })); return; }
     if (en) { const [tabName, i] = en.dataset.entry.split(':'); placeEntry(GALLERY[tabName][+i], at); return; }
     if (re) { const img = g.querySelector('.g-body')._srcs[+re.dataset.reuse]; const c = at || viewCenter(-0.1); addItem(makeItem('photo', c.x, Math.min(groundAt(c.x, 150), c.y), { src: img, caption: '' }, { a: (Math.random() - 0.5) * 0.1 })); }
@@ -1182,12 +1208,6 @@ async function addPhotoFile(f, replaceFor = null, at = null) {
     toast('Photo added. It stays in this browser only.');
   } catch { toast('Could not read that image.'); }
 }
-function toggleGallery(tab) {
-  const g = $('[data-gallery]');
-  const cur = g.querySelector('[aria-selected="true"]')?.dataset.tab;
-  if (!g.hidden && cur === tab) { g.hidden = true; return; }
-  openGallery(tab);
-}
 function buildPenBar() {
   const bar = $('[data-penbar]');
   const tools = [['pen', ICONS.pen, 'Pen (pressure-sensitive)'], ['marker', ICONS.marker, 'Marker'], ['highlighter', ICONS.highlighter, 'Highlighter'], ['eraser', ICONS.eraser, 'Eraser (E) · also the pen’s eraser end']];
@@ -1220,9 +1240,9 @@ function setTool(t) {
   viewport.dataset.tool = t;
   $('[data-penbar]').hidden = t !== 'pen';
   $('[data-shovelbar]').hidden = t !== 'shovel';
-  $('[data-seedbar]').hidden = t !== 'seed';
+  if (t === 'pen' || t === 'shovel') closeList();
   if (t !== 'shovel') { const c = ink.getContext('2d'); c.clearRect(0, 0, ink.width, ink.height); }
-  if (t === 'pen' || t === 'shovel' || t === 'seed') select(null);
+  if (t === 'pen' || t === 'shovel') select(null);
 }
 function setFlash(on) {
   flashlight = on;
@@ -1272,16 +1292,26 @@ function toolPlace(t, at) {
   if (t === 'note') addItem(makeItem('note', c.x, y, { text: 'Write something…', paper: 'classic' }, { a: (Math.random() - 0.5) * 0.08 }), { edit: true });
   if (t === 'card') addItem(makeItem('card', c.x, y, { title: 'New card', body: 'Double-click to edit me.', style: 'white' }), { inspect: true });
   if (t === 'photo') { pendingImageFor = null; pendingPhotoAt = at; $('[data-file]').click(); }
-  if (t === 'cloud') placeEntry(GALLERY.Elements[0], at || viewCenter(-0.3));
-  if (t === 'fire') placeEntry(GALLERY.Elements[3], at || viewCenter());
+  if (t === 'cloud') placeEntry(GALLERY.Elements.find((e) => e.type === 'cloud'), at || viewCenter(-0.3));
+  if (t === 'fire') placeEntry(GALLERY.Elements.find((e) => e.type === 'fire'), at || viewCenter());
 }
 function dragHint(el) {
   el.classList.remove('wiggle'); void el.offsetWidth; el.classList.add('wiggle');
   toast('Drag it onto the board to place it.', 1600);
 }
-function startDrag(e, src, place) {
+function startDrag(e, src, place, opts = {}) {
   if (e.button > 0) return;
-  dnd = { id: e.pointerId, x: e.clientX, y: e.clientY, src, place, moved: false, ghost: null };
+  dnd = { id: e.pointerId, x: e.clientX, y: e.clientY, cx: e.clientX, cy: e.clientY, src, place, moved: false, over: false, ...opts, ghost: opts.ghost || null };
+}
+// the watering can pours from its spout (at the pointer) while it is dragged over the board
+let pourAcc = 0;
+function pourCan(dt) {
+  if (!dnd?.can || !dnd.moved || !dnd.over) return;
+  const p = camera.toWorld(dnd.cx, dnd.cy);
+  pourAcc += Math.min(3, dt / 16.667) * 1.3;
+  const z = camera.get().z;
+  for (; pourAcc >= 1; pourAcc--) elements.spawn({ k: 'drip', x: p.x + (Math.random() - 0.5) * 6 / z, y: p.y + 2 / z, vx: 1.6 + Math.random() * 1.4, vy: 0.4 + Math.random() * 0.8, life: 400 });
+  if (frame % 24 === 0) sfx.tick();
 }
 addEventListener('pointermove', (e) => {
   if (!dnd || e.pointerId !== dnd.id) return;
@@ -1290,16 +1320,19 @@ addEventListener('pointermove', (e) => {
     dnd.moved = true;
     const gh = document.createElement('div');
     gh.className = 'dnd-ghost';
-    gh.innerHTML = (dnd.src.querySelector('svg, img, .g-art, .mini-note, .mini-card, .mini-bubble, .mini-txt') || dnd.src).outerHTML;
+    gh.innerHTML = typeof dnd.ghost === 'string' ? dnd.ghost : (dnd.src.querySelector('svg, img, .g-art, .mini-note, .mini-card, .mini-bubble, .mini-txt') || dnd.src).outerHTML;
+    if (dnd.can) gh.classList.add('can');
     document.body.appendChild(gh);
-    dnd.ghost = gh;
+    dnd.ghostEl = gh;
     document.body.classList.add('dragging-new');
     try { dnd.src.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     sfx.tick();
   }
-  dnd.ghost.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+  dnd.ghostEl.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+  dnd.cx = e.clientX; dnd.cy = e.clientY;
   const over = overBoard(e.clientX, e.clientY);
-  dnd.ghost.classList.toggle('ok', over);
+  dnd.over = over;
+  dnd.ghostEl.classList.toggle('ok', over);
 });
 function overBoard(x, y) {
   const el = document.elementFromPoint(x, y);
@@ -1310,9 +1343,10 @@ const endDnd = (e) => {
   const d = dnd;
   dnd = null;
   document.body.classList.remove('dragging-new');
-  d.ghost?.remove();
+  d.ghostEl?.remove();
   if (!d.moved) return;
   dndDropAt = performance.now();
+  if (d.can) { commit(); return; }
   if (e.type === 'pointerup' && overBoard(e.clientX, e.clientY)) d.place(camera.toWorld(e.clientX, e.clientY));
   else toast('Drop it on the board to place it.', 1400);
 };
@@ -1321,58 +1355,45 @@ addEventListener('pointercancel', endDnd);
 
 // ---------------- plants ----------------
 let emptyDown = null;
-let seedSel = 'sunflower';
-function stageOf(p) { const sp = SPECIES[p.sp]; const k = p.age / sp.days; return sp.dead ? 'dead' : k < 0.15 ? 'seedling' : k < 0.5 ? 'young' : k < 1 ? 'growing' : 'mature'; }
 function plantInfo(p) {
   const sp = SPECIES[p.sp];
-  const m = Math.round(water.moistureAt(p.x) * 100);
-  return `${SPECIES_ICON[p.sp] || '🌱'} ${sp.name} · ${stageOf(p)} · health ${Math.round(p.hp * 100)}% · soil ${m}% wet${p.burnt > 0.5 ? ' · burnt (regrowing)' : ''}${p.dry > 0.4 ? ' · thirsty!' : ''}`;
+  return `${sp.name} · ${flora.stage(p)} · ${Math.round(p.g * 100)}% grown${p.burnt > 0.5 ? ' · burnt: water it to bring it back' : p.g < 1 ? ' · water it to grow' : ''}`;
 }
 function onEmptyTap(pt) {
   const p = flora.hit(pt.x, pt.y);
   if (p) { toast(plantInfo(p), 3200); sfx.tick(); }
 }
+let plantTipShown = false;
 function plantAt(x, sp) {
   const def = SPECIES[sp];
   if (!def) return;
   if (def.aquatic ? water.depthAt(x) < 10 : water.depthAt(x) > 6) { toast(def.aquatic ? `${def.name} needs a pond: plant it in water.` : 'Too wet here: plant on dry ground.', 2000); return; }
   if (terrain.matAt(x) === 'rock') { toast('Nothing grows on rock.', 1600); return; }
-  flora.add(sp, x, { age: def.days * 0.22 });
+  flora.add(sp, x, { g: 0 });
   sfx.pop(0.8);
+  if (!plantTipShown) { plantTipShown = true; toast(`${def.name} planted! Water it to make it grow: drag the watering can (Water list) over it.`, 3600); }
   commit();
 }
 function harvestPlant(p) {
   const sp = SPECIES[p.sp];
-  const n = sp.form === 'vinecrop' ? 2 : 3;
-  for (let i = 0; i < n; i++) { const b = flora.bbox(p); addItem(makeItem('fruit', p.x + (Math.random() - 0.5) * b.w * 0.6, b.y0 + b.h * 0.4, { color: sp.fruit, kind: p.sp, big: (sp.fruitSize || 0.3) > 0.8 }, { pin: null }), { quiet: true }); }
+  const kind = sp.overlay.fruit;
+  for (let i = 0; i < 3; i++) { const b = flora.bbox(p); addItem(makeItem('fruit', p.x + (Math.random() - 0.5) * b.w * 0.6, b.y0 + b.h * 0.4, { color: '#dd2e44', kind }, { pin: null }), { quiet: true }); }
   select(null);
   sfx.coin();
-  toast(`Harvested ${sp.name.toLowerCase()} fruit!`, 1600);
+  toast(`Harvested ${kind}s!`, 1600);
 }
 function openPlantMenu(x, y, p) {
   const sp = SPECIES[p.sp];
   const c = world.clock.get();
-  const fruity = sp.fruit && sp.fruitSeason?.includes(c.seasonIdx) && flora.size(p) > 0.7 && p.burnt < 0.5;
   menu.open(x, y, [
-    { header: `${sp.name} · ${stageOf(p)}` },
+    { header: `${sp.name} · ${flora.stage(p)}` },
     { label: 'Info', icon: ICONS.info, run: () => toast(plantInfo(p), 3600) },
     { label: 'Water it', icon: ICONS.water, run: () => { flora.waterPlant(p); sfx.splash(); commit(); } },
-    { label: 'Harvest', icon: ICONS.plant, disabled: !fruity, run: () => harvestPlant(p) },
-    { label: 'Prune', icon: ICONS.smaller, run: () => { p.age = Math.max(sp.days * 0.3, p.age * 0.8); commit(); } },
+    ...(sp.overlay?.fruit ? [{ label: 'Harvest', icon: ICONS.plant, disabled: !flora.canHarvest(p, c.seasonIdx), run: () => harvestPlant(p) }] : []),
     { label: 'Light it on fire', icon: ICONS.fire, run: () => { if (!fire.ignite(p.x, 2, c, world.weather.snow || 0)) toast('Too wet to burn.', 1500); } },
     '-',
     { label: 'Dig it up', icon: ICONS.trash, danger: true, run: () => { flora.remove(p.id); sfx.whoosh(); commit(); } },
   ]);
-}
-function buildSeedBar() {
-  const bar = $('[data-seedbar]');
-  let cat = 'Flowers';
-  const paint = () => {
-    bar.innerHTML = `<div class="sb-cats">${SPECIES_CATS.map((c) => `<button type="button" data-scat="${c}" aria-pressed="${c === cat}">${c}</button>`).join('')}</div><div class="sb-list">${Object.entries(SPECIES).filter(([, d]) => d.cat === cat).map(([k, d]) => `<button type="button" data-sp="${k}" aria-pressed="${k === seedSel}" title="${d.name}"><span>${SPECIES_ICON[k] || '🌱'}</span>${d.name}</button>`).join('')}</div>`;
-  };
-  bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.scat) cat = b.dataset.scat; if (b.dataset.sp) seedSel = b.dataset.sp; sfx.tick(); paint(); });
-  bar.addEventListener('pointerdown', (e) => e.stopPropagation());
-  paint();
 }
 
 // ---------------- world: time bar, sun scrubbing, shovel, ink mode ----------------
@@ -1453,12 +1474,11 @@ addEventListener('keydown', (e) => {
   if (map[k]) { setTool(map[k]); return; }
   if (k === 'e') { setTool('pen'); penOpts.tool = 'eraser'; $('[data-penbar] [data-pt="eraser"]')?.click(); return; }
   if (k === 'b') { setTool('shovel'); return; }
-  if (k === 'y') { setTool('seed'); return; }
   if (k === 'i') { $('[data-ink-toggle]').click(); return; }
-  if (k === 't') $('[data-tool="text"]').click();
-  if (k === 'n') $('[data-tool="note"]').click();
-  if (k === 'k') $('[data-tool="card"]').click();
-  if (k === 's' || k === 'g') toggleGallery('Stickers');
+  if (k === 't') toolPlace('text', null);
+  if (k === 'n') toolPlace('note', null);
+  if (k === 'k') toolPlace('card', null);
+  if (k === 's' || k === 'g') toggleList('stickers');
   if (k === 'c') takeSnapshot();
   if (k === 'f') setFlash(!flashlight);
   if (k === '+' || k === '=') camera.zoomAt(1.25);

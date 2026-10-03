@@ -7,11 +7,14 @@ import { pinOffset } from './items.js';
 const GRAVITY = { on: 1, low: 0.25, off: 0 };
 const CIRCLES = new Set(['ball', 'coin', 'clock', 'fruit']);
 
-export function createPhysics({ terrain, reduced = false }) {
+export function createPhysics({ terrain, reduced = false, shapeOf = null }) {
   const groundY = terrain.groundY;
   const S = (x) => terrain.surfaceY(x);
   const M = window.Matter;
-  const { Engine, Bodies, Body, Composite, Constraint, Sleeping, Events } = M;
+  const { Engine, Bodies, Body, Composite, Constraint, Sleeping, Events, Common, Vertices } = M;
+  if (window.decomp && Common.setDecomp) Common.setDecomp(window.decomp);
+  // rotate a local vector by angle a
+  const R = (v, a) => ({ x: v.x * Math.cos(a) - v.y * Math.sin(a), y: v.x * Math.sin(a) + v.y * Math.cos(a) });
   const engine = Engine.create({ enableSleeping: true });
   engine.gravity.y = GRAVITY.on;
   engine.positionIterations = 8;
@@ -26,7 +29,14 @@ export function createPhysics({ terrain, reduced = false }) {
   let drag = null;
   let gravityMode = 'on';
 
+  // standing things keep standing: their traced outline is top-heavy, so they don't spin
+  const UPRIGHT = new Set(['fan', 'tank', 'tap', 'sprinkler', 'bore', 'windsock', 'flag', 'magnet']);
   function bodyFor(item, w, h) {
+    const b = makeBody(item, w, h);
+    if (b && UPRIGHT.has(item.type)) Body.setInertia(b, Infinity);
+    return b;
+  }
+  function makeBody(item, w, h) {
     const sw = Math.max(8, w * item.s), sh = Math.max(8, h * item.s);
     const t = item.type;
     const opts = {
@@ -43,10 +53,49 @@ export function createPhysics({ terrain, reduced = false }) {
       return Bodies.rectangle(item.x, item.y, sw, sh, opts);
     }
     if (CIRCLES.has(t)) return Bodies.circle(item.x, item.y, Math.min(sw, sh) / 2, opts);
+    // a real outline (traced from the picture) or the pen strokes, instead of the box
+    const shape = shapeOf?.(item, w, h);
+    if (shape) {
+      try {
+        const k = item.s;
+        let body = null;
+        const o = { ...opts };
+        delete o.angle;
+        if (shape.segs) {
+          const parts = shape.segs.map(([x1, y1, x2, y2, wd]) => {
+            const L = Math.hypot(x2 - x1, y2 - y1) * k + wd * k * 0.9;
+            return Bodies.rectangle(item.x + ((x1 + x2) / 2) * k, item.y + ((y1 + y2) / 2) * k, Math.max(4, L), Math.max(4, wd * k), { angle: Math.atan2(y2 - y1, x2 - x1), chamfer: { radius: Math.max(1.5, (wd * k) / 2 - 0.5) }, label: item.id });
+          });
+          body = Body.create({ ...o, parts });
+        } else {
+          let pts = shape.pts.map((p) => ({ x: item.x + p.x * k, y: item.y + p.y * k }));
+          // small things get their convex outline (one stable part); bigger ones the exact concave shape
+          if (sw * sh < 120 * 120) pts = Vertices.hull(pts);
+          const c = Vertices.centre(pts);
+          body = Bodies.fromVertices(c.x, c.y, [pts], o, true);
+          if (body && body.parts.length > 9) { const h = Vertices.hull(pts); const hc = Vertices.centre(h); body = Bodies.fromVertices(hc.x, hc.y, [h], o, true); }
+          if (body && Math.abs(body.area) < 20) body = null;
+        }
+        if (body) {
+          body.parts.forEach((pt) => { pt.label = item.id; });
+          const off = { x: body.position.x - item.x, y: body.position.y - item.y };
+          body.boxOff = off; // centre of mass relative to the item's box centre (unrotated)
+          if (item.a) { Body.setAngle(body, item.a); const r = R(off, item.a); Body.setPosition(body, { x: item.x + r.x, y: item.y + r.y }); }
+          return body;
+        }
+      } catch { /* fall back to a box */ }
+    }
     if (t === 'balloon') return Bodies.circle(item.x, item.y - sh * 0.12, sw / 2.1, opts);
     return Bodies.rectangle(item.x, item.y, sw, sh, { ...opts, chamfer: { radius: Math.min(10, sw / 6, sh / 6) } });
   }
 
+  /** The item's box centre from its body (bodies may be centred on their mass, not the box). */
+  function boxCentre(body) {
+    const o = body.boxOff;
+    if (!o) return { x: body.position.x, y: body.position.y };
+    const r = R(o, body.angle);
+    return { x: body.position.x - r.x, y: body.position.y - r.y };
+  }
   function applyPin(rec) {
     const { item, body } = rec;
     rec.frozen = false;
@@ -57,7 +106,9 @@ export function createPhysics({ terrain, reduced = false }) {
       const off = pinOffset(item, rec.w, rec.h);
       const ox = off.x * item.s, oy = off.y * item.s;
       const c = Math.cos(body.angle), s = Math.sin(body.angle);
-      const local = { x: ox * c - oy * s, y: ox * s + oy * c };
+      const bo = body.boxOff || { x: 0, y: 0 };
+      const lx = ox - bo.x, ly = oy - bo.y;
+      const local = { x: lx * c - ly * s, y: lx * s + ly * c };
       const anchor = item.pa || { x: body.position.x + local.x, y: body.position.y + local.y };
       item.pa = { x: anchor.x, y: anchor.y };
       rec.pinC = Constraint.create({ pointA: { ...anchor }, bodyB: body, pointB: local, length: 0, stiffness: 0.95, damping: 0.02 });
@@ -101,7 +152,8 @@ export function createPhysics({ terrain, reduced = false }) {
     const rec = map.get(id);
     if (!rec) return;
     const { item } = rec;
-    item.x = rec.body.position.x; item.y = rec.body.position.y; item.a = rec.body.angle;
+    const bc = boxCentre(rec.body);
+    item.x = bc.x; item.y = bc.y; item.a = rec.body.angle;
     remove(id);
     add(item, w, h);
   }
@@ -126,7 +178,9 @@ export function createPhysics({ terrain, reduced = false }) {
   function setAngle(id, a) {
     const rec = map.get(id);
     if (!rec) return;
+    const bc = boxCentre(rec.body);
     Body.setAngle(rec.body, a);
+    if (rec.body.boxOff) { const r = R(rec.body.boxOff, a); Body.setPosition(rec.body, { x: bc.x + r.x, y: bc.y + r.y }); }
     rec.item.a = a;
     if (rec.item.pin === 'pin') { delete rec.item.pa; applyPin(rec); }
     Sleeping.set(rec.body, false);
@@ -136,7 +190,8 @@ export function createPhysics({ terrain, reduced = false }) {
   function moveTo(id, x, y) {
     const rec = map.get(id);
     if (!rec) return;
-    Body.setPosition(rec.body, { x, y });
+    const r = rec.body.boxOff ? R(rec.body.boxOff, rec.body.angle) : { x: 0, y: 0 };
+    Body.setPosition(rec.body, { x: x + r.x, y: y + r.y });
     if (rec.pinC) { rec.pinC.pointA.x += x - rec.item.x; rec.pinC.pointA.y += y - rec.item.y; rec.item.pa = { ...rec.pinC.pointA }; }
     rec.item.x = x; rec.item.y = y;
   }
@@ -247,6 +302,11 @@ export function createPhysics({ terrain, reduced = false }) {
     const g = engine.gravity.y * engine.gravity.scale;
     map.forEach((rec) => {
       const { item, body } = rec;
+      // safety: never let a body spin or fly off absurdly fast (tight contacts on compound shapes)
+      if (!body.isStatic) {
+        if (Math.abs(body.angularVelocity) > 0.4) Body.setAngularVelocity(body, Math.sign(body.angularVelocity) * 0.4);
+        if (body.speed > 55) Body.setVelocity(body, { x: (body.velocity.x / body.speed) * 55, y: (body.velocity.y / body.speed) * 55 });
+      }
       if (item.pin === 'pin' && !rec.frozen && drag?.rec !== rec) {
         Body.setAngularVelocity(body, body.angularVelocity * 0.985);
         if (body.speed < 0.06 && Math.abs(body.angularVelocity) < 0.001) {
@@ -286,9 +346,10 @@ export function createPhysics({ terrain, reduced = false }) {
     let moved = false;
     map.forEach(({ item, body }) => {
       if (!body.isSleeping || drag?.rec.body === body) {
-        if (Math.abs(item.x - body.position.x) > 0.01 || Math.abs(item.y - body.position.y) > 0.01 || Math.abs(item.a - body.angle) > 0.0001) moved = true;
-        item.x = body.position.x;
-        item.y = body.position.y;
+        const bc = boxCentre(body);
+        if (Math.abs(item.x - bc.x) > 0.01 || Math.abs(item.y - bc.y) > 0.01 || Math.abs(item.a - body.angle) > 0.0001) moved = true;
+        item.x = bc.x;
+        item.y = bc.y;
         item.a = body.angle;
       }
     });

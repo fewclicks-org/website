@@ -102,7 +102,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
           const d = Math.max(40, Math.hypot(px, py));
           const str = m.d.strength || 1;
           if (d > 1000 * str) continue;
-          const f = Math.min(4, (140000 * str) / (d * d));
+          const f = Math.min(4, (175000 * str) / (d * d));
           physics.push(rec, (px / d) * f, (py / d) * f);
           if (d < 70) physics.setVelocity(rec, body.velocity.x * 0.6, body.velocity.y * 0.6);
         }
@@ -234,7 +234,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       const dir = f.a + (f.d.dir < 0 ? Math.PI : 0);
       if (Math.random() < 0.5 * t60) add({ k: 'wind', x: f.x + Math.cos(dir) * 70 * f.s, y: f.y - 10 * f.s + (Math.random() - 0.5) * 90 * f.s, vx: Math.cos(dir) * 14 * (f.d.power || 1), vy: Math.sin(dir) * 14 * (f.d.power || 1), life: 40 + Math.random() * 20 });
     }
-    const fanVec = (x, y) => {
+    const fanVec = fanVecRef = (x, y) => {
       let fx = 0, fy = 0;
       for (const f of fans) {
         const dir = f.a + (f.d.dir < 0 ? Math.PI : 0), dx = Math.cos(dir), dy = Math.sin(dir);
@@ -349,6 +349,12 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       }
     }
 
+    // strong wind whips spray off the tops of waves
+    if (Math.abs(world.wind) > 1.6 && water.activeCount && Math.random() < 0.6 * t60) {
+      const x = view.x + Math.random() * view.w;
+      const ws = water.surfaceAt(x, 8);
+      if (ws != null) for (let i = 0; i < 3; i++) add({ k: 'drip', x, y: ws - 2, vx: world.wind * (1.5 + Math.random()), vy: -1.5 - Math.random() * 2, life: 120 });
+    }
     // move particles + collisions (rain & snow are blocked by items)
     if (P.length) {
       const solids = [];
@@ -387,7 +393,8 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
           p.vx += (fv.x * 0.6 + (p.k === 'rain' ? world.wind * 0.02 : 0)) * t60;
           p.vy += fv.y * 0.6 * t60;
           if (p.k === 'rain') p.vy = Math.min(22, p.vy + 0.5 * t60);
-          if (p.k === 'drip') { p.vy = Math.min(20, p.vy + 0.45 * t60); p.vx += world.wind * 0.01 * t60; }
+          if (p.k === 'drip') { p.vy = Math.min(20, p.vy + 0.45 * t60); p.vx = p.vx * 0.99 + world.wind * 0.03 * t60; }
+          if (p.k === 'rain') p.vx = p.vx * 0.98 + world.wind * 0.06 * t60;
           if (p.k === 'snow') { p.ph += 0.05 * t60; p.vx = p.vx * 0.96 + (Math.sin(p.ph) * 0.6 + world.wind * 1.2) * 0.04; p.vy = Math.min(2.6, p.vy + 0.02 * t60); }
           if (p.k === 'foam') p.vy += p.g * t60;
           p.x += p.vx * t60; p.y += p.vy * t60;
@@ -456,14 +463,17 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     return ny; // < 0 means the edge faces up
   }
   function startRun(p, rec) {
-    const body = rec.body;
-    const e = topEdge(body, p.x, p.y);
+    // use the real part of the shape under the drop (compound bodies: traced outline / pen strokes)
+    const parts = rec.body.parts.length > 1 ? rec.body.parts.slice(1) : [rec.body];
+    let e = null, pi = 0;
+    parts.forEach((pt, i) => { const t = topEdge(pt, p.x, p.y); if (t && t.ey <= p.y + 14 && (!e || t.ey < e.ey)) { e = t; pi = rec.body.parts.length > 1 ? i + 1 : 0; } });
     if (!e) return false;
+    const body = rec.body.parts[pi] || rec.body;
     const v = body.vertices, a = v[e.i], b = v[(e.i + 1) % v.length];
     // dir +1 = move from vertex a to b, -1 = from b to a; always downhill
     let dir = b.y >= a.y ? 1 : -1;
     if (Math.abs(b.y - a.y) < 0.5) dir = Math.random() < 0.5 ? -1 : 1;
-    add({ k: 'run', id: rec.item.id, i: e.i, u: e.t, dir, sp: 0.6 + Math.random() * 0.6, life: 400, x: p.x, y: e.ey });
+    add({ k: 'run', id: rec.item.id, pi, i: e.i, u: e.t, dir, sp: 0.6 + Math.random() * 0.6, life: 400, x: p.x, y: e.ey });
     rec.item.d.wet = Math.min(1, (rec.item.d.wet || 0) + 0.02);
     if (Math.random() < 0.1) api.patch(rec.item);
     return true;
@@ -472,7 +482,8 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     const rec = physics.recOf(p.id);
     p.life -= t60;
     if (!rec || p.life <= 0) return true;
-    const v = rec.body.vertices, n = v.length;
+    const part = rec.body.parts[p.pi] || rec.body;
+    const v = part.vertices, n = v.length;
     let a = v[p.i % n], b = v[(p.i + 1) % n];
     const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     const steep = Math.abs(b.y - a.y) / len;
@@ -480,10 +491,10 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     if (p.u > 1 || p.u < 0) {
       // move on to the next edge if it still faces up, otherwise drip off this corner
       const ni = (p.i + (p.dir > 0 ? 1 : -1) + n) % n;
-      if (edgeNormalUp(rec.body, ni) < -0.25) { p.i = ni; p.u = p.dir > 0 ? 0 : 1; a = v[ni]; b = v[(ni + 1) % n]; }
+      if (edgeNormalUp(part, ni) < -0.25) { p.i = ni; p.u = p.dir > 0 ? 0 : 1; a = v[ni]; b = v[(ni + 1) % n]; }
       else {
         const cx = p.dir > 0 ? b.x : a.x, cy = p.dir > 0 ? b.y : a.y;
-        add({ k: 'drip', x: cx + (cx > rec.body.position.x ? 2 : -2), y: cy + 2, vx: (cx > rec.body.position.x ? 1 : -1) * 0.8 + rec.body.velocity.x, vy: 1, life: 300 });
+        add({ k: 'drip', x: cx + (cx > part.position.x ? 2 : -2), y: cy + 2, vx: (cx > part.position.x ? 1 : -1) * 0.8 + rec.body.velocity.x, vy: 1, life: 300 });
         return true;
       }
     }
@@ -492,6 +503,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     return false;
   }
   const ripples = [];
+  let fanVecRef = null;
   function ripple(x, y) { if (ripples.length < 60 && Math.random() < 0.3) ripples.push({ x, y, r: 2, life: 30 }); }
   let snowAcc = 0;
   function groundSnow(x) { snowAcc += 1; }
@@ -523,24 +535,40 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
   // ---------------- drawing ----------------
   let extraDraw = null; // set by app: { active(), draw(ctx, view, cam, t) } for water surfaces etc.
   let pipeFlow = () => false;
+  let pipePort = null;
+  /** Pipes run from the source's outlet to the sink's inlet: out of the port, down under the ground, across, and up. */
   function drawPipe(A, B, l) {
-    // pipes run down from A, along, and up into B (rounded elbows)
-    const a = { x: A.x, y: A.y + 20 }, b = { x: B.x, y: B.y + 20 };
-    const midY = Math.max(a.y, b.y) + 40;
+    if (!pipePort) return;
+    const pa = pipePort(A, B), pb = pipePort(B, A);
+    const s1 = { x: pa.p.x + pa.dir[0] * 26, y: pa.p.y + pa.dir[1] * 26 };
+    const s2 = { x: pb.p.x + pb.dir[0] * 26, y: pb.p.y + pb.dir[1] * 26 };
+    const g1 = S(s1.x), g2 = S(s2.x);
+    const nearGround = g1 - s1.y < 320 && g2 - s2.y < 320;
+    const yr = nearGround ? Math.max(g1, g2, S((s1.x + s2.x) / 2)) + 22 : Math.max(s1.y, s2.y) + 40;
+    const pts = [pa.p, s1, { x: s1.x, y: yr }, { x: s2.x, y: yr }, s2, pb.p];
     const path = new Path2D();
-    path.moveTo(a.x, a.y); path.lineTo(a.x, midY - 30); path.quadraticCurveTo(a.x, midY, a.x + Math.sign(b.x - a.x) * 30, midY);
-    path.lineTo(b.x - Math.sign(b.x - a.x) * 30, midY); path.quadraticCurveTo(b.x, midY, b.x, midY - 30); path.lineTo(b.x, b.y);
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#2b2f34'; ctx.lineWidth = 22; ctx.stroke(path);
-    ctx.strokeStyle = '#9aa3ad'; ctx.lineWidth = 16; ctx.stroke(path);
-    ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = 4; ctx.stroke(path);
+    path.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) path.arcTo(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, 16);
+    path.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+    ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#66757F'; ctx.lineWidth = 15; ctx.stroke(path);
+    ctx.strokeStyle = '#99AAB5'; ctx.lineWidth = 11; ctx.stroke(path);
+    ctx.strokeStyle = 'rgba(225,232,237,.9)'; ctx.lineWidth = 3; ctx.save(); ctx.translate(0, -2.5); ctx.stroke(path); ctx.restore();
     if (pipeFlow(l.id)) {
-      ctx.strokeStyle = 'rgba(70,160,255,.95)'; ctx.lineWidth = 7;
-      ctx.setLineDash([18, 22]); ctx.lineDashOffset = -performance.now() / 18;
+      ctx.strokeStyle = 'rgba(85,172,238,.95)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      ctx.setLineDash([10, 16]); ctx.lineDashOffset = -performance.now() / 22;
       ctx.stroke(path);
       ctx.setLineDash([]);
     }
-    for (const p of [a, b]) { ctx.fillStyle = '#6b737c'; ctx.beginPath(); ctx.arc(p.x, p.y, 13, 0, Math.PI * 2); ctx.fill(); }
+    // collars on the bends + flanges on the devices
+    ctx.fillStyle = '#66757F';
+    for (const q of [pts[1], pts[2], pts[3], pts[4]]) { ctx.beginPath(); ctx.arc(q.x, q.y, 9, 0, Math.PI * 2); ctx.fill(); }
+    for (const [q, d] of [[pa.p, pa.dir], [pb.p, pb.dir]]) {
+      ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(Math.atan2(d[1], d[0]));
+      ctx.fillStyle = '#66757F'; ctx.fillRect(-2, -11, 8, 22);
+      ctx.fillStyle = '#CCD6DD'; ctx.fillRect(-1, -9, 3, 18);
+      ctx.restore();
+    }
   }
   function draw(cam) {
     const items = getItems();
@@ -656,6 +684,14 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
           if (!p.petal) { ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(7, 0); ctx.stroke(); }
           ctx.restore();
           break;
+        case 'sparkle': {
+          const k = Math.max(0, Math.min(1, p.life / 40)), r = (p.r || 5) * (0.6 + k * 0.4);
+          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.life * 0.05);
+          ctx.fillStyle = `rgba(255,204,77,${k})`;
+          ctx.beginPath(); ctx.moveTo(0, -r); ctx.quadraticCurveTo(0, 0, r, 0); ctx.quadraticCurveTo(0, 0, 0, r); ctx.quadraticCurveTo(0, 0, -r, 0); ctx.quadraticCurveTo(0, 0, 0, -r); ctx.fill();
+          ctx.restore();
+          break;
+        }
         case 'fluff':
           ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 1;
           for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2 + p.ph; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(a) * 6, p.y + Math.sin(a) * 6); ctx.stroke(); }
@@ -716,9 +752,11 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
   return {
     world, update, draw, strike, extinguish, ignite, spray, spin, resize,
     spawn: (p) => add(p),
+    windAt: (x, y) => world.wind + (fanVecRef ? fanVecRef(x, y).x * 1.5 : 0),
     strikeAt,
     setExtraDraw(o) { extraDraw = o; },
     setPipeFlow(fn) { pipeFlow = fn; },
+    setPipePort(fn) { pipePort = fn; },
     takeSnow() { const v = snowAcc; snowAcc = 0; return v; },
     get busy() { return P.length > 0 || bolts.length > 0; },
     particleCount: () => P.length,

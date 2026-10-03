@@ -108,7 +108,7 @@ function inner(item) {
     case 'magnet':
       return `<div class="obj">${magnetSvg()}</div>`;
     case 'plant':
-      return `<div class="pot"><div class="plant">${plantSvg(d.species)}</div>${potSvg()}</div>`;
+      return `<div class="obj">${plantSvg(d.species)}</div>`;
     case 'dice':
       return `<div class="obj">${diceSvg(d.face || 6)}</div>`;
     case 'clock':
@@ -124,7 +124,7 @@ function inner(item) {
     case 'spinner':
       return `<div class="obj">${spinnerSvg(d.labels || ['Play', 'Again', 'Win', 'GG', 'Wow', 'Yay'])}</div><span class="open-hint">tap to spin</span>`;
     case 'fruit':
-      return `<div class="obj" style="width:${d.big ? 110 : 56}px">${fruitSvg(d.color, d.big)}</div>`;
+      return `<div class="obj" style="width:${d.big ? 96 : 56}px">${fruitSvg(d.kind)}</div>`;
     case 'bore':
       return `<div class="obj">${boreSvg(d.pump || 'hand')}</div><span class="open-hint">${d.pump === 'hand' || !d.pump ? 'tap to pump' : 'right-click: pipe'}</span>`;
     case 'tank':

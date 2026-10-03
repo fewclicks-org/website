@@ -52,7 +52,6 @@
   <nav class="tools" id="tools" data-tools aria-label="Tools"></nav>
   <div class="penbar" data-penbar hidden role="toolbar" aria-label="Pen options"></div>
   <div class="penbar shovelbar" data-shovelbar hidden role="toolbar" aria-label="Terrain tools"></div>
-  <div class="seedbar" data-seedbar hidden role="toolbar" aria-label="Seed bag"></div>
   <section class="timebar" data-timebar aria-label="World time" hidden></section>
   <div class="gallery" data-gallery hidden role="dialog" aria-label="Gallery"></div>
 
@@ -74,8 +73,9 @@
     </ul>
     <p class="muted" data-storage></p>
     <h3>Tips</h3>
-    <p class="muted"><b>Drag</b> to move, <b>flick</b> to toss · tap a <b>pin</b> to drop an item · <b>double-click</b> anything to edit it · <b>right-click</b> or <b>long-press</b> for the menu · <b>scroll / pinch</b> to zoom · <b>Space + drag</b> to pan · <b>D</b> pen (pressure-sensitive with a tablet), <b>E</b> eraser · <b>G</b> gallery · <b>F</b> flashlight · <b>C</b> snapshot · <b>Del</b> delete.</p>
-    <p class="muted">Weather: rain is blocked by anything above it, grows plants and puts out fires. Snow piles up and freezes water. Paper burns. Fans blow, magnets pull metal, storm clouds strike.</p>
+    <p class="muted"><b>Drag</b> to move, <b>flick</b> to toss · tap a <b>pin</b> to drop an item · <b>double-click</b> anything to edit it · <b>right-click</b> or <b>long-press</b> for the menu · <b>scroll / pinch</b> to zoom · <b>Space + drag</b> to pan · <b>D</b> pen (pressure-sensitive with a tablet), <b>E</b> eraser · <b>S</b> stickers · <b>F</b> flashlight · <b>C</b> snapshot · <b>Del</b> delete.</p>
+    <p class="muted">Nature: rain runs along the real shape of things and puts out fires. Wind pushes rain and pond water. Plants grow only when watered: drag one from <b>Plants</b>, then drag the watering can from <b>Water</b> over it. Snow piles up and freezes water. Paper burns. Fans blow, magnets pull metal, storm clouds strike.</p>
+    <p class="muted">Art: <a href="art/README.md">Twemoji</a> graphics by Twitter, Inc. and contributors, CC-BY 4.0.</p>
     <p class="muted">Contact: <a href="mailto:admin@fewclicks.org">admin@fewclicks.org</a></p>
     <button type="button" class="btn wide" data-close>Got it</button>
   </dialog>
@@ -85,6 +85,7 @@
   <div class="toast" data-toast role="status" aria-live="polite"></div>
   <div class="flashfx" aria-hidden="true"></div>
 
+  <script src="../vendor/poly-decomp.min.js"></script>
   <script src="../vendor/matter.min.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>

@@ -30,7 +30,7 @@ img { display: block; max-width: 100%; }
 .dots { position: absolute; inset: 0; pointer-events: none; opacity: 1; background-image: radial-gradient(rgba(15, 15, 16, 0.16) 1.6px, transparent 1.8px); background-size: 40px 40px; transition: opacity 0.3s; }
 /* Ink world: all color removed, the original sketchbook look */
 body.ink .viewport { filter: grayscale(1) contrast(1.06); }
-body.ink .dots { opacity: 1; }
+body.ink .dots { display: none; }
 .viewport.scrubbing { cursor: ew-resize; }
 .viewport[data-tool='shovel'] { cursor: crosshair; }
 .viewport[data-tool='hand'], .viewport.space { cursor: grab; }
@@ -468,3 +468,71 @@ body.dragging-new .viewport { box-shadow: inset 0 0 0 4px rgba(255, 59, 48, 0.35
 
 /* tooltip-style label for the side toolbar */
 .tools button { position: relative; }
+
+/* ---------- v4 flat art ---------- */
+.obj img.tw, .stk img.tw { display: block; width: 100%; height: auto; pointer-events: none; }
+.flipx { transform: scaleX(-1); }
+.stk { width: 110px; height: 110px; }
+.stk img.tw { height: 100%; }
+.campfire { position: relative; width: 100%; }
+.campfire .flame { position: relative; width: 70%; margin: 0 auto -18%; opacity: 0.95; }
+.campfire .logs { width: 100%; }
+.it-fire .flame { display: block !important; }
+.it-fire.out .flame { display: none !important; }
+.it-fire .obj { width: 110px; }
+.it-sun .obj { width: 150px; }
+.it-lamp .obj { width: 90px; }
+.it-torch .obj { width: 100px; }
+.it-ball .obj { width: 90px; }
+.it-balloon .obj { width: 90px; }
+.it-camera .obj { width: 110px; }
+.it-cloud .obj { width: 220px; }
+.it-magnet .obj { width: 90px; }
+.it-duck .obj { width: 90px; }
+.it-coin .obj { width: 60px; }
+.it-clip .obj { width: 56px; }
+.it-ice .obj { width: 76px; }
+.it-extinguisher .obj { width: 90px; }
+.it-bucket .obj { width: 96px; }
+.it-flag .obj { width: 100px; }
+.it-kite .obj { width: 100px; }
+.it-dice .obj { width: 80px; }
+.it-clock .obj { width: 120px; }
+.it-clock .hh, .it-clock .mm, .it-clock .ss { transform-box: view-box; transform-origin: 18px 18px; }
+.it-tap .obj { width: 120px; }
+.it-tap .valve { transform-box: view-box; transform-origin: 18.5px 5px; transition: transform 0.3s; }
+.it-tap.on .valve { transform: scaleX(0.35); }
+.it-tank .obj { width: 120px; }
+.it-bore .obj { width: 120px; }
+.it-bore .rotor { transform-box: view-box; transform-origin: 20px 12px; transform: rotate(var(--rot, 0rad)); }
+.it-bore .handle { transform-box: view-box; transform-origin: 13px 11px; transform: rotate(var(--pump, 0deg)); }
+.it-sprinkler .obj { width: 90px; }
+.it-sprinkler .head { transform-box: view-box; transform-origin: 18px 17px; transform: rotate(var(--sw, 0deg)); }
+.it-can .obj { width: 120px; }
+.it-fan .obj { width: 110px; }
+.it-fan.on .blades { transform-box: view-box; transform-origin: 18px 15px; animation: spinfan calc(0.35s / var(--fp, 1)) linear infinite; }
+@keyframes spinfan { to { transform: rotate(360deg); } }
+.it-fan.flip .obj svg { transform: none; }
+.it-windsock .obj { width: 100px; }
+.it-windsock .sock { transform-box: view-box; transform-origin: 5px 8px; transform: rotate(var(--sock, 80deg)); transition: transform 0.6s; }
+.it-windsock.left .sock { transform: scaleX(-1) rotate(var(--sock, 80deg)); }
+.it-flag img.cloth { transform-origin: 20% 50%; animation: wave var(--fspd, 1s) ease-in-out infinite alternate; }
+.it-flag.left img.cloth { animation-name: waveL; }
+.it-flag.limp img.cloth { animation: none; }
+.it-spinner .obj { width: 200px; }
+.it-spinner .wheel { transform-box: view-box; transform-origin: 50px 50px; }
+
+.dots { display: none !important; } /* plain white board */
+
+/* v4: one list per sidebar button */
+.tools button[data-list][aria-pressed='true'] { background: rgba(255, 255, 255, 0.2); color: #fff; box-shadow: inset 3px 0 0 #fff; }
+.g-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--line); }
+.g-head b { font-size: 14px; font-weight: 800; letter-spacing: 0.01em; }
+.g-head .g-x { margin-left: auto; display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
+.g-head .g-x:hover { background: #f1f1f2; }
+.g-grid button > img.tw, .g-art img.tw { object-fit: contain; border-radius: 0; }
+.g-art img.tw { width: auto; height: 54px; max-width: 72px; }
+.g-art > .campfire { width: 54px; height: 54px; }
+.dnd-ghost.can { margin: -20px 0 0 -67px; opacity: 0.95; }
+.can-ghost { display: block; width: 72px; height: 53px; transform: rotate(30deg); transform-origin: 67px 10.5px; }
+.can-ghost svg { width: 100%; height: 100%; }

@@ -30,7 +30,7 @@ export function createFire({ terrain, water, flora, spawn, sfx }) {
       if (Math.abs(p.x - x) > CELL) continue;
       const sp = SPECIES[p.sp];
       if (sp.aquatic || p.burnt > 0.8) continue;
-      f = Math.max(f, (sp.drought ? 0.3 : 0.9) * flora.size(p) * (1 - water.moistureAt(x) * 0.6) + (sp.dead ? 0.6 : 0));
+      f = Math.max(f, 0.9 * flora.size(p) * (1 - water.moistureAt(x) * 0.6));
     }
     return f;
   }

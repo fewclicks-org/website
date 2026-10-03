@@ -18,8 +18,10 @@ export function createWater({ terrain }) {
   const MO = new Map(); // col -> soil moisture 0..1 (missing = baseline)
   const GW = new Map(); // chunk -> water table depth below base ground line (px)
   let baseline = 0.3;
+  let windAt = () => 0; // wind (incl. fans) at a world point; set by the app
   let acc = 0;
   let version = 0;
+  let onAdd = null; // plants drink water that reaches the ground
   const G = terrain.groundY;
   const th = (c) => terrain.heightAtCol(c);
   const matIdx = (c) => ({ grass: 0, sand: 1, clay: 2, rock: 3, dirt: 4 })[terrain.matAt(c * COL + 1)];
@@ -39,6 +41,7 @@ export function createWater({ terrain }) {
     const per = amount / (c1 - c0 + 1);
     for (let c = c0; c <= c1; c++) setDepth(c, depth(c) + per);
     version++;
+    onAdd?.(x, amount);
   }
   /** Water surface y at x (world), or null when there is (almost) no water. */
   function surfaceAt(x, min = 1) {
@@ -157,6 +160,9 @@ export function createWater({ terrain }) {
           const ia = ICE.get(a) || 0, ib = ICE.get(b) || 0;
           const ha = th(a) + da, hb = th(b) + db;
           let q = (ha - hb) * 0.24;
+          // wind drags the surface: water piles up on the downwind shore
+          const wv = windAt(b * COL, G - th(b) - db);
+          if (wv) q += wv * 0.012 * Math.min(1, (da + db) / 24);
           if (q > 0) q = Math.min(q, (da - ia) * 0.5); else q = Math.max(q, -(db - ib) * 0.5);
           if (Math.abs(q) < 0.001) continue;
           delta.set(a, (delta.get(a) || 0) - q);
@@ -220,7 +226,8 @@ export function createWater({ terrain }) {
       ctx.beginPath();
       const first = r[0], last = r[r.length - 1];
       ctx.moveTo(first * COL, G - th(first));
-      for (const c of r) ctx.lineTo(c * COL + COL / 2, top(c) + Math.sin(t * 2 + c * 0.7) * Math.min(2, depth(c) * 0.08));
+      const wave = (c) => { const w = Math.abs(windAt(c * COL, top(c))); return Math.sin(t * (2 + w * 0.8) - c * 0.7 * Math.sign(windAt(c * COL, top(c)) || 1)) * Math.min(1.5 + w * 2.2, depth(c) * 0.12); };
+      for (const c of r) ctx.lineTo(c * COL + COL / 2, top(c) + wave(c));
       ctx.lineTo((last + 1) * COL, G - th(last + 1));
       for (let i = r.length - 1; i >= 0; i--) ctx.lineTo(r[i] * COL + COL / 2, G - th(r[i]));
       ctx.closePath();
@@ -233,7 +240,7 @@ export function createWater({ terrain }) {
       // surface highlight
       ctx.strokeStyle = 'rgba(220,245,255,.85)'; ctx.lineWidth = 2.5;
       ctx.beginPath();
-      r.forEach((c, i) => { const y = top(c) + Math.sin(t * 2 + c * 0.7) * Math.min(2, depth(c) * 0.08); i ? ctx.lineTo(c * COL + COL / 2, y) : ctx.moveTo(c * COL + COL / 2, y); });
+      r.forEach((c, i) => { const y = top(c) + wave(c); i ? ctx.lineTo(c * COL + COL / 2, y) : ctx.moveTo(c * COL + COL / 2, y); });
       ctx.stroke();
       // sparkles in daylight
       for (const c of r) if ((c * 7 + Math.floor(t * 3)) % 23 === 0) { ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillRect(c * COL, top(c) - 1, 6, 2); }
@@ -275,7 +282,7 @@ export function createWater({ terrain }) {
   }
 
   return {
-    add, take, pump, pond, tick, drink, soak, surfaceAt, iceAt, moistureAt, tableY, depthAt: (x) => depth(col(x)),
+    add, take, pump, pond, tick, drink, soak, setWind(fn) { windAt = fn; }, onAdd(fn) { onAdd = fn; }, surfaceAt, iceAt, moistureAt, tableY, depthAt: (x) => depth(col(x)),
     drawBack, drawFront, serialize, load,
     get version() { return version; },
     get activeCount() { return Wd.size; },
