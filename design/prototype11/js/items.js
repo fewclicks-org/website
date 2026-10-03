@@ -4,7 +4,7 @@
 import {
   STICKERS, OBJECTS, fontFamily, cloudSvg, fireSvg, fanSvg, magnetSvg, potSvg, plantSvg, diceSvg, clockSvg,
   duckSvg, clipSvg, iceSvg, coinSvg, spinnerSvg, extinguisherSvg,
-  boreSvg, tankSvg, sprinklerSvg, tapSvg, canSvg, bucketSvg, windsockSvg, flagSvg, kiteSvg,
+  boreSvg, fruitSvg, tankSvg, sprinklerSvg, tapSvg, canSvg, bucketSvg, windsockSvg, flagSvg, kiteSvg,
 } from './art.js';
 import { strokePath } from './pen.js';
 
@@ -17,7 +17,7 @@ export const PAPER_TYPES = new Set(['note', 'text', 'photo', 'card', 'doodle', '
 /** Things a magnet pulls. */
 export const METAL_TYPES = new Set(['coin', 'clip', 'camera', 'torch', 'fan', 'extinguisher', 'spinner']);
 /** Things that float in water (others sink). */
-export const FLOATERS = new Set(['note', 'text', 'photo', 'card', 'doodle', 'bubble', 'game', 'sticker', 'duck', 'ball', 'balloon', 'ice', 'plant', 'dice']);
+export const FLOATERS = new Set(['fruit', 'note', 'text', 'photo', 'card', 'doodle', 'bubble', 'game', 'sticker', 'duck', 'ball', 'balloon', 'ice', 'plant', 'dice']);
 
 /** Things that connect with pipes. */
 export const PIPE_TYPES = new Set(['bore', 'tank', 'sprinkler', 'tap']);
@@ -29,7 +29,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 /** Default physics/pin mode for newly created items. */
 export function defaultPin(type) {
   if (['sun', 'torch', 'camera', 'title', 'doodle', 'cloud', 'water', 'spinner', 'bore', 'windsock', 'flag', 'sprinkler', 'tank', 'tap'].includes(type)) return 'lock';
-  if (['ball', 'balloon', 'sticker', 'fire', 'fan', 'dice', 'duck', 'coin', 'clip', 'ice', 'extinguisher', 'plant', 'can', 'bucket', 'kite'].includes(type)) return null;
+  if (['ball', 'balloon', 'sticker', 'fire', 'fan', 'dice', 'duck', 'coin', 'clip', 'ice', 'extinguisher', 'plant', 'can', 'bucket', 'kite', 'fruit'].includes(type)) return null;
   return 'pin';
 }
 
@@ -61,7 +61,7 @@ export function label(item) {
     title: d.text, text: `Text: ${d.text}`, note: `Note: ${d.text}`, bubble: `Speech bubble: ${d.text}`, photo: `Photo: ${d.caption || 'picture'}`, game: `Game: ${d.caption}`,
     sticker: 'Sticker', doodle: 'Drawing', sun: 'Sun (light source)', lamp: 'Hanging lamp', torch: 'Torch', ball: 'Bouncy ball', balloon: 'Balloon', camera: 'Instant camera', card: `Card: ${d.title || 'Say hello'}`,
     cloud: `${d.mode || 'rain'} cloud`, fire: 'Campfire', water: d.frozen ? 'Ice' : 'Water pool', fan: 'Fan', magnet: 'Magnet', plant: `Plant (${d.species || 'flower'})`,
-    bore: `Water bore (${d.pump || 'hand'} pump)`, tank: 'Water tank', sprinkler: 'Sprinkler', tap: 'Tap', can: 'Watering can', bucket: 'Bucket', windsock: 'Wind sock', flag: 'Flag', kite: 'Kite',
+    fruit: 'Fruit', bore: `Water bore (${d.pump || 'hand'} pump)`, tank: 'Water tank', sprinkler: 'Sprinkler', tap: 'Tap', can: 'Watering can', bucket: 'Bucket', windsock: 'Wind sock', flag: 'Flag', kite: 'Kite',
     dice: 'Dice', clock: 'Clock', duck: 'Rubber duck', coin: 'Coin', clip: 'Paperclip', ice: 'Ice cube', spinner: 'Spinner wheel', extinguisher: 'Fire extinguisher',
   })[item.type] || item.type;
 }
@@ -123,6 +123,8 @@ function inner(item) {
       return `<div class="obj">${iceSvg()}</div>`;
     case 'spinner':
       return `<div class="obj">${spinnerSvg(d.labels || ['Play', 'Again', 'Win', 'GG', 'Wow', 'Yay'])}</div><span class="open-hint">tap to spin</span>`;
+    case 'fruit':
+      return `<div class="obj" style="width:${d.big ? 110 : 56}px">${fruitSvg(d.color, d.big)}</div>`;
     case 'bore':
       return `<div class="obj">${boreSvg(d.pump || 'hand')}</div><span class="open-hint">${d.pump === 'hand' || !d.pump ? 'tap to pump' : 'right-click: pipe'}</span>`;
     case 'tank':

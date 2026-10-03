@@ -164,8 +164,11 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
 
   function strike(cloud) {
     const { w, h } = dims(cloud);
-    const x0 = cloud.x + (Math.random() - 0.5) * w * 0.4, y0 = cloud.y + h * 0.35;
-    const hit = castDown(x0, y0, new Set([cloud.id]));
+    strikeAt(cloud.x + (Math.random() - 0.5) * w * 0.4, cloud.y + h * 0.35, cloud.id);
+  }
+  /** Lightning from (x0, y0) down to the first thing below it. */
+  function strikeAt(x0, y0, skipId = null) {
+    const hit = castDown(x0, y0, new Set(skipId ? [skipId] : []));
     const pts = [[x0, y0]];
     const steps = Math.max(4, Math.round((hit.y - y0) / 70));
     for (let i = 1; i < steps; i++) pts.push([x0 + (Math.random() - 0.5) * 70, y0 + ((hit.y - y0) * i) / steps]);
@@ -182,7 +185,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       if (PAPER_TYPES.has(it.type) && Math.random() < 0.7) { it.d.onfire = true; it.d.burn = Math.max(it.d.burn || 0, 0.05); api.patch(it); }
       if (it.type === 'fire' && it.d.lit === false) ignite(it);
       if (it.type === 'plant') { it.d.dry = 1; api.patch(it); }
-    }
+    } else api.fireAt?.(x0, 1.6); // ground strike: trees and dry grass can catch fire
     mark();
   }
 
@@ -253,6 +256,12 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     for (const f of fires) {
       const size = (f.d.size || 1) * f.s;
       const zone = { x1: f.x - 55 * size, x2: f.x + 55 * size, y1: f.y - 150 * size, y2: f.y + 30 * size };
+      if (near(f, view, 400)) {
+        const fl = (2.2 + size) * t60;
+        for (let i = 0; i < fl; i++) add({ k: 'flame', x: f.x + (Math.random() - 0.5) * 46 * size, y: f.y + 10 * size, vx: (Math.random() - 0.5) * 0.5 + world.wind * 0.25, vy: -1.6 - Math.random() * 1.8 * size, life: 24 + Math.random() * 20 * size, r: (9 + Math.random() * 9) * size });
+        if (Math.random() < 0.12 * t60) add({ k: 'smoke', x: f.x, y: f.y - 90 * size, vx: world.wind * 0.6, vy: -1, life: 140, r: 12 });
+      }
+      if (Math.random() < 0.0008 * t60 * (1 + Math.abs(world.wind))) api.fireAt?.(f.x + Math.sign(world.wind || 1) * (60 + Math.random() * 60), 0.7);
       if (near(f, view, 300) && Math.random() < 0.35 * t60) add({ k: 'ember', x: f.x + (Math.random() - 0.5) * 50 * size, y: f.y - 40 * size, vx: (Math.random() - 0.5) * 1.4, vy: -2 - Math.random() * 2.5, life: 30 + Math.random() * 40, g: -0.02 });
       f.d.wet = Math.max(0, (f.d.wet || 0) - 0.0015 * t60);
       for (const it of items) {
@@ -271,6 +280,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     // things that are on fire by themselves (struck by lightning) + burn-up
     for (const it of items) {
       if (it.d?.onfire) {
+        if (Math.random() < 0.01 * t60) { const b = physics.bodyOf(it.id)?.bounds; if (b && S(it.x) - b.max.y < 30) api.fireAt?.(it.x, 0.8); }
         it.d.burn = (it.d.burn || 0) + dt / 4200;
         api.patch(it);
         if (Math.random() < 0.5 * t60) { const b = physics.bodyOf(it.id)?.bounds; if (b) add({ k: 'ember', x: b.min.x + Math.random() * (b.max.x - b.min.x), y: b.min.y + Math.random() * 20, vx: (Math.random() - 0.5), vy: -2 - Math.random() * 2, life: 30 + Math.random() * 30, g: -0.02 }); }
@@ -350,6 +360,28 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
         const p = P[i];
         p.life -= t60;
         if (p.k === 'run') { if (runStep(p, t60)) P.splice(i, 1); continue; }
+        if (p.k === 'flame') { p.x += (p.vx + Math.sin(p.life * 0.5 + p.x) * 0.3) * t60; p.y += p.vy * t60; p.vy -= 0.02 * t60; if (p.life <= 0) P.splice(i, 1); continue; }
+        if (p.k === 'leaf' || p.k === 'fluff') {
+          if (p.landed) { if (p.life <= 0) P.splice(i, 1); continue; }
+          p.ph += 0.06 * t60;
+          const fall = p.k === 'fluff' ? 0.25 : p.petal ? 0.9 : 1.3;
+          p.vx = p.vx * 0.96 + (world.wind * (p.k === 'fluff' ? 1.6 : 1) + Math.sin(p.ph) * 1.2) * 0.04 * t60 * 6;
+          p.vy = p.vy * 0.9 + (fall + Math.cos(p.ph * 1.3) * 0.5) * 0.1 * t60;
+          if (p.k === 'fluff') p.vy -= 0.02;
+          p.x += p.vx * t60; p.y += p.vy * t60;
+          const gy = S(p.x);
+          if (p.y >= gy - 2) { p.y = gy - 2; p.landed = true; p.life = p.k === 'fluff' ? 1 : Math.min(p.life, 500); }
+          if (p.life <= 0) P.splice(i, 1);
+          continue;
+        }
+        if (p.k === 'hail') {
+          p.vy = Math.min(18, p.vy + 0.5 * t60); p.x += p.vx * t60; p.y += p.vy * t60;
+          const gy = S(p.x);
+          const hb = Query.point(solidBodies, { x: p.x, y: p.y })[0];
+          if (hb || p.y >= gy) { if (p.bounced) { P.splice(i, 1); continue; } p.bounced = true; p.vy = -p.vy * 0.35; p.vx *= 0.5; p.y -= 4; if (hb) { const r = recByBody.get(hb); if (r && FLOATERS.has(r.item.type) && !r.item.pin) physics.push(r, 0, 0.6); } }
+          if (p.life <= 0) P.splice(i, 1);
+          continue;
+        }
         if (p.k === 'rain' || p.k === 'snow' || p.k === 'foam' || p.k === 'drip') {
           const fv = fanVec(p.x, p.y);
           p.vx += (fv.x * 0.6 + (p.k === 'rain' ? world.wind * 0.02 : 0)) * t60;
@@ -376,10 +408,12 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
               if (startRun(p, rec)) { P.splice(i, 1); continue; }
             }
             if (p.k === 'rain' || p.k === 'drip') {
-              if (!rec) { water.add(p.x, 0.1); if (Math.random() < 0.5) splash(p.x, gy, 2); }
+              if (!rec) { water.add(p.x, 0.22); if (Math.random() < 0.5) splash(p.x, gy, 2); }
               else splash(p.x, p.y, 1);
             }
             if (p.k === 'snow' && !rec) groundSnow(p.x);
+            if (p.k === 'foam' && !rec) api.douse?.(p.x);
+            if ((p.k === 'drip' || p.k === 'rain') && !rec && Math.random() < 0.05) api.douse?.(p.x, 0);
             P.splice(i, 1); continue;
           }
           if (p.life <= 0) { P.splice(i, 1); continue; }
@@ -601,6 +635,35 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
           ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.arc(p.x, p.y, 7 + (70 - p.life) * 0.12, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
           break;
+        case 'flame': {
+          const k = Math.max(0, p.life / 40);
+          ctx.globalCompositeOperation = 'lighter';
+          const r = p.r * (0.4 + k * 0.6);
+          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+          g.addColorStop(0, k > 0.6 ? 'rgba(255,240,180,.9)' : 'rgba(255,170,60,.8)');
+          g.addColorStop(0.5, `rgba(255,${Math.round(80 + k * 90)},20,${0.55 * k + 0.1})`);
+          g.addColorStop(1, 'rgba(200,40,0,0)');
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+          ctx.globalCompositeOperation = 'source-over';
+          break;
+        }
+        case 'leaf':
+          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.landed ? 0.3 : Math.sin(p.ph) * 1.2);
+          ctx.fillStyle = p.col || '#d9773a';
+          ctx.globalAlpha = p.landed ? Math.min(1, p.life / 120) : 1;
+          ctx.beginPath(); ctx.ellipse(0, 0, p.petal ? 5 : 8, p.petal ? 3.5 : 4.5, 0, 0, Math.PI * 2); ctx.fill();
+          if (!p.petal) { ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(7, 0); ctx.stroke(); }
+          ctx.restore();
+          break;
+        case 'fluff':
+          ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 1;
+          for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2 + p.ph; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(a) * 6, p.y + Math.sin(a) * 6); ctx.stroke(); }
+          break;
+        case 'hail':
+          ctx.fillStyle = '#eef6ff'; ctx.strokeStyle = 'rgba(120,150,190,.8)'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          break;
         case 'drip':
           ctx.strokeStyle = 'rgba(80,150,230,.8)'; ctx.lineWidth = 3;
           ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx, p.y - Math.min(8, p.vy)); ctx.stroke();
@@ -653,6 +716,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
   return {
     world, update, draw, strike, extinguish, ignite, spray, spin, resize,
     spawn: (p) => add(p),
+    strikeAt,
     setExtraDraw(o) { extraDraw = o; },
     setPipeFlow(fn) { pipeFlow = fn; },
     takeSnow() { const v = snowAcc; snowAcc = 0; return v; },

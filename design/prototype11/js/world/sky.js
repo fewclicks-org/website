@@ -147,6 +147,14 @@ export function createSky(canvas) {
       ctx.fillStyle = rgb(cloudCol, 0.42 + cover * 0.4);
       for (let j = 0; j < 5; j++) { ctx.beginPath(); ctx.ellipse(x + (j - 2) * 46 * cl.s, y - Math.sin(j / 4 * Math.PI) * 24 * cl.s, 60 * cl.s, 34 * cl.s, 0, 0, Math.PI * 2); ctx.fill(); }
     }
+    // rainbow opposite the sun after rain
+    if (weather.rainbow > 0.02 && c.isDay) {
+      const cx = W * (0.5 - 0.44 * clamp(c.sunX, -1, 1)), r = Math.min(W, H) * 0.55;
+      const cols = ['255,60,60', '255,150,40', '255,230,60', '80,200,90', '70,140,255', '120,80,220'];
+      ctx.save(); ctx.globalAlpha = Math.min(0.55, weather.rainbow * 0.6); ctx.lineWidth = r * 0.03;
+      cols.forEach((col, i) => { ctx.strokeStyle = `rgb(${col})`; ctx.beginPath(); ctx.arc(cx, hy + r * 0.15, r - i * r * 0.03, Math.PI, 0); ctx.stroke(); });
+      ctx.restore();
+    }
     if (weather.fog) { ctx.fillStyle = `rgba(220,224,230,${weather.fog * 0.6})`; ctx.fillRect(0, 0, W, H); }
   }
 

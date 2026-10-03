@@ -59,6 +59,10 @@ export function createWater({ terrain }) {
     GW.set(k, Math.min(BEDROCK - 20, d + amount * 0.02));
     return amount;
   }
+  /** Plants drink soil moisture. */
+  function drink(x, a) { const c = col(x); MO.set(c, Math.max(0.02, moisture(c) - a)); }
+  /** Rain falling somewhere we don't simulate drops (off-screen): wet the soil directly. */
+  function soak(x, a) { const c = col(x); const m = moisture(c) + a; if (m > 1) { MO.set(c, 1); recharge(c, (m - 1) * CAP); } else MO.set(c, m); }
   /** Drain surface water at x into a container (watering can, bucket). */
   function take(x, amount, width = 64) {
     let got = 0;
@@ -271,7 +275,7 @@ export function createWater({ terrain }) {
   }
 
   return {
-    add, take, pump, pond, tick, surfaceAt, iceAt, moistureAt, tableY, depthAt: (x) => depth(col(x)),
+    add, take, pump, pond, tick, drink, soak, surfaceAt, iceAt, moistureAt, tableY, depthAt: (x) => depth(col(x)),
     drawBack, drawFront, serialize, load,
     get version() { return version; },
     get activeCount() { return Wd.size; },

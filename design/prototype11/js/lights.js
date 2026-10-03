@@ -29,6 +29,8 @@ export function createLights(canvas) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     // sunset tint
+    if (env.fog > 0.02) { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = `rgba(226,230,236,${Math.min(0.55, env.fog * 0.5)})`; ctx.fillRect(0, 0, W, H); }
+    if (env.heat > 0) { ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = `rgba(255,190,90,${env.heat * 0.08})`; ctx.fillRect(0, 0, W, H); }
     if (amb.warm > 0) {
       ctx.globalCompositeOperation = 'source-over';
       ctx.fillStyle = `rgba(255,120,40,${amb.warm * 0.16})`;
@@ -64,6 +66,13 @@ export function createLights(canvas) {
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
       }
+    }
+    for (const l of env.extra || []) {
+      const p = S(l.x, l.y);
+      const r = l.r * cam.z * (1 + Math.sin(t / 80 + l.x) * 0.05);
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.5, 'rgba(0,0,0,.75)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
     }
     if (flashlight) {
       const r = 240;
@@ -105,12 +114,12 @@ export function createLights(canvas) {
       const el = els.get(it.id);
       if (!el) continue;
       if (it.type === 'water' || it.type === 'cloud') { setShadow(el, it.type === 'cloud' ? 'drop-shadow(0 30px 24px rgba(0,0,0,.12))' : 'none'); continue; }
+      if (it.type === 'sun') { setShadow(el, 'drop-shadow(0 0 40px rgba(255,200,40,.9))'); continue; }
       if (it.type === 'lamp') { setShadow(el, darkness > 0.3 ? 'drop-shadow(0 0 24px rgba(255,220,150,.9))' : 'drop-shadow(0 6px 6px rgba(0,0,0,.2))'); continue; }
       let lx, ly, strength;
       if (sun) {
-        // the sun is far away: a direction, not a point. Low sun = long shadows.
-        const len0 = Math.min(5, 1 / Math.tan(Math.max(0.05, sun.alt)));
-        lx = it.x - sun.dirX * 1000 * len0; ly = it.y - 1000; strength = Math.min(1.8, 0.5 + len0 * 0.35);
+        // shadows point away from the sun item; a low sun casts longer shadows
+        lx = sun.x; ly = sun.y; strength = Math.min(1.8, 0.7 + Math.min(4, 1 / Math.tan(Math.max(0.08, sun.alt))) * 0.25);
       } else {
         let best = null, bd = Infinity;
         for (const l of lamps) { const d = Math.hypot(l.x - it.x, l.y - it.y); if (d < bd) { bd = d; best = l; } }
@@ -120,7 +129,7 @@ export function createLights(canvas) {
       const dx = it.x - lx, dy = it.y - ly;
       const d = Math.hypot(dx, dy) || 1;
       const lift = it.pin === 'pin' ? 22 : it.pin === 'lock' ? 12 : 7;
-      const len = lift * strength * (sun ? 1.2 : 1.4) * (sun ? 1 : Math.min(1.6, 0.6 + d / 1200));
+      const len = lift * strength * (sun ? 1.1 : 1.4) * Math.min(1.6, 0.6 + d / 1200);
       // shadow offset must be expressed in the item's rotated space
       const ox = (dx / d) * len, oy = (dy / d) * len;
       const c = Math.cos(-it.a), s = Math.sin(-it.a);

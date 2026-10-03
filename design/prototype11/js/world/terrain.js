@@ -241,6 +241,11 @@ export function createTerrain({ groundY }) {
       }
       shades.forEach((p, i) => { ctx.fillStyle = gcol[i]; ctx.fill(p); });
     }
+    // morning frost
+    if (env.frost > 0.1 && z > 0.1) {
+      ctx.strokeStyle = `rgba(236,246,255,${Math.min(0.7, env.frost * 0.7)})`; ctx.lineWidth = 10;
+      ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y - 6) : ctx.moveTo(x, y - 6))); ctx.stroke();
+    }
     // snow cover on the surface
     if (env.snow > 0.02) {
       ctx.strokeStyle = '#f7fbff'; ctx.lineWidth = 6 + env.snow * 26;

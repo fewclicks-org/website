@@ -190,6 +190,7 @@ Object.assign(ICONS, {
   flip: I('<path d="M12 3v18"/><path d="M8 7l-5 5 5 5z"/><path d="M16 7l5 5-5 5z"/>'),
   world: I('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>'),
   paste: I('<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V2h6v2"/>'),
+  seed: I('<path d="M6 9h12l-1 11H7z"/><path d="M8 9c0-3 2-5 4-5s4 2 4 5"/><path d="M12 13v4M10 15h4"/>'),
   shovel: I('<path d="M14 4l6 6"/><path d="M17 7l-7 7"/><path d="M10 14l-1.5-1.5-4 4a2.1 2.1 0 0 0 3 3l4-4z"/>'),
   palette: I('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-1.3-1-1.6-1-2.7 0-1 .8-1.5 1.8-1.5H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7" r="1.2" fill="currentColor"/>'),
 });
@@ -213,3 +214,5 @@ export const bucketSvg = () => S(`<path d="M14 30 H86 L76 100 H24Z" fill="#c3cad
 export const windsockSvg = () => S(`<rect x="8" y="10" width="7" height="170" fill="#6b737c" ${outline}/><g class="sock" style="transform-origin:14px 22px"><path d="M14 10 L110 18 L110 34 L14 40Z" fill="#ff7a1a" ${outline}/><path d="M38 12 V38 M62 14 V36 M86 16 V36" stroke="#fff" stroke-width="7"/></g>`, '0 0 120 184');
 export const flagSvg = () => S(`<rect x="8" y="6" width="7" height="174" fill="#6b737c" ${outline}/><circle cx="11" cy="6" r="6" fill="#ffd23f" ${outline}/><g class="cloth" style="transform-origin:14px 20px"><path d="M14 12 C40 4 60 22 96 12 V58 C60 68 40 50 14 58Z" fill="#111"/><text x="54" y="44" font-family="Rubik Bubbles, Bungee, sans-serif" font-size="22" text-anchor="middle" fill="#fff">F</text></g>`, '0 0 110 184');
 export const kiteSvg = () => S(`<path d="M50 4 L92 52 L50 120 L8 52Z" fill="#ff3b6b" ${outline}/><path d="M50 4 V120 M8 52 H92" stroke="#111" stroke-width="2.5"/><path d="M50 4 L92 52 L50 52Z" fill="#ffd23f"/><path d="M8 52 L50 120 L50 52Z" fill="#4cc9ff"/><path d="M50 120 q-10 14 0 22 t0 22" fill="none" stroke="#111" stroke-width="2.5"/><path d="M44 142 l12 -4 M44 162 l12 -4" stroke="#7b5cff" stroke-width="6"/>`, '0 0 100 170');
+
+export const fruitSvg = (color = '#e8352b', big = false) => S(`<circle cx="50" cy="${big ? 54 : 56}" r="${big ? 40 : 34}" fill="${color}" ${outline}/><path d="M50 22 C50 14 54 10 58 8" fill="none" stroke="#5a3b26" stroke-width="5" stroke-linecap="round"/><path d="M54 18 C64 8 78 12 80 18 C70 24 60 22 54 18Z" fill="#4fae3a" ${outline} stroke-width="2"/><ellipse cx="36" cy="44" rx="8" ry="5" fill="#fff" opacity=".45" transform="rotate(-30 36 44)"/>`);

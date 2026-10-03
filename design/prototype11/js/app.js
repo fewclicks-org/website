@@ -25,10 +25,13 @@ import { loadBoard, saveBoard, clearBoard, createHistory, exportFile, importFile
 import { seedBoard, GROUND_Y, CENTER } from './seed.js';
 import { createTerrain } from './world/terrain.js';
 import { createWorld } from './world/world.js';
-import { SPEEDS } from './world/clock.js';
 import { createWater } from './world/water.js';
 import { createAtmos } from './world/atmos.js';
 import { createDevices } from './world/pipes.js';
+import { createFlora } from './world/flora.js';
+import { createFire } from './world/fire.js';
+import { createWeather, STATES as WEATHER } from './world/weather.js';
+import { SPECIES, SPECIES_CATS, SPECIES_ICON } from './world/species.js';
 import { boreSvg, tankSvg, sprinklerSvg, tapSvg, canSvg, bucketSvg, windsockSvg, flagSvg, kiteSvg } from './art.js';
 import { PIPE_TYPES, ROOTED } from './items.js';
 
@@ -65,6 +68,7 @@ const lights = createLights(lightCanvas);
 const minimap = createMinimap($('[data-minimap]'), camera, { terrain });
 const world = createWorld({ skyCanvas: $('[data-sky]'), backCanvas: $('[data-wback]'), camera, terrain });
 const groundAt = (x, up = 0) => terrain.surfaceY(x) - up;
+world.setSun(() => board?.items.find((i) => i.type === 'sun') || null);
 const menu = createMenu();
 let camDirty = true;
 const byId = (id) => board?.items.find((i) => i.id === id);
@@ -79,6 +83,8 @@ const elements = createElements({
     remove: (it) => { removeItem(it.id); commit(); },
     commit: () => commit(),
     toast: (m) => toast(m, 3200),
+    fireAt: (x, force = 1) => fire.ignite(x, force, world.clock.get(), world.weather.snow || 0),
+    douse: (x, r) => fire.douse(x, r ?? 48),
     sfx,
   },
 });
@@ -90,17 +96,26 @@ const devices = createDevices({
   spawn: (p) => elements.spawn(p),
   clockGet: () => world.clock.get(),
 });
+const flora = createFlora({ terrain, water, spawn: (p) => elements.spawn(p) });
+const fire = createFire({ terrain, water, flora, spawn: (p) => elements.spawn(p), sfx });
+const weather = createWeather({ terrain, camera, spawn: (p) => elements.spawn(p), strikeAt: (x, y) => elements.strikeAt(x, y) });
 elements.setExtraDraw({ active: () => water.activeCount > 0, draw: (ctx, view, cam) => water.drawFront(ctx, view, cam, world.time) });
 elements.setPipeFlow(devices.isFlowing);
 world.systems.push({
   tick(dt, worldMin, c) {
+    weather.tick(dt, worldMin, c, world.weather);
     atmos.tick(dt, c, worldMin, world.weather);
+    flora.tick(dt, worldMin, c, world.weather);
+    fire.tick(dt, c, atmos.wind, world.weather);
+    // rain where we don't draw drops: soak the soil under plants directly
+    if (world.weather.rain > 0 && worldMin > 0) { const v = camera.viewRect(); for (const p of flora.list) if (p.x < v.x || p.x > v.x + v.w) water.soak(p.x, world.weather.rain * worldMin * 0.0008); }
+    if (world.weather.snowing > 0 && worldMin > 0) world.weather.snow = Math.min(1, (world.weather.snow || 0) + world.weather.snowing * worldMin * 0.0006);
     world.weather.wind = atmos.wind;
     water.tick(dt, c, worldMin);
     // fresh snow on the ground melts above freezing
     world.weather.snow = Math.max(0, Math.min(1, world.weather.snow + elements.takeSnow() * 0.0012 - (c.temp > 0 ? 0.00025 * (1 + c.temp / 5) * (1 + worldMin * 30) : 0)));
   },
-  drawBack(ctx, view, cam) { water.drawBack(ctx, view, cam); devices.drawBack(ctx, view); },
+  drawBack(ctx, view, cam, c, t) { water.drawBack(ctx, view, cam); fire.drawBack(ctx, view); devices.drawBack(ctx, view); flora.draw(ctx, view, cam, c, t, world.weather); },
 });
 
 const inspector = createInspector({
@@ -118,6 +133,8 @@ async function init() {
   board = normalize(saved || (DATA ? seedBoard(DATA) : { version: 3, gravity: 'on', items: [] }));
   world.load(board.world?.clock);
   atmos.load(board.world?.atmos);
+  weather.load(board.world?.weather);
+  weather.setMode('manual', 'clear'); // weather comes from the cloud items you place
   world.weather.snow = board.world?.snow || 0;
   await document.fonts?.ready;
   mountAll();
@@ -127,18 +144,18 @@ async function init() {
   else startView();
   if (!saved) {
     physics.settle(reducedMotion ? 400 : 30);
-    toast('Welcome! Right-click (or long-press) anything. Try ⏩ in the time bar to watch days and seasons pass.', 5200);
+    toast('Welcome! Drag things from the toolbar onto the board. Right-click (or long-press) anything for more.', 5200);
   } else if (reducedMotion) physics.settle(200);
   history.push(serialize());
   syncHistoryUI();
-  paintTimebar(world.clock.get());
   requestAnimationFrame(loop);
   document.body.classList.add('ready');
 }
 function normalize(b) {
   b.links = b.links || [];
   b.world = b.world || { wind: 0 };
-  b.items = b.items.filter((i) => i.type !== 'sun'); // the sun lives in the sky now
+  // the sun is a draggable item: higher = brighter, none = night
+  if (!b.items.some((i) => i.type === 'sun') && !b.world.night) b.items.push(makeItem('sun', CENTER.x, 330, {}, { s: 1.4, z: 0 }));
   return b;
 }
 function startView() {
@@ -151,9 +168,11 @@ function serialize() {
     version: 3,
     gravity: physics.gravity,
     cam: camera.get(),
-    world: { clock: world.clock.state, atmos: atmos.serialize(), snow: +world.weather.snow.toFixed(3) },
+    world: { clock: world.clock.state, atmos: atmos.serialize(), weather: weather.serialize(), snow: +(world.weather.snow || 0).toFixed(3) },
     terrain: terrain.serialize(),
     water: water.serialize(),
+    flora: flora.serialize(),
+    fire: fire.serialize(),
     links: board.links,
     items: board.items.map(({ v, ...it }) => ({ ...it, x: +it.x.toFixed(1), y: +it.y.toFixed(1), a: +it.a.toFixed(4) })),
   }, (k, v) => (k.startsWith('_') ? undefined : v)));
@@ -202,6 +221,8 @@ function mountAll() {
   unmountAll();
   terrain.load(board.terrain);
   water.load(board.water);
+  flora.load(board.flora);
+  fire.load(board.fire);
   // v2 water pools become real ponds dug into the ground
   for (const w of board.items.filter((i) => i.type === 'water')) water.pond(w.x - (w.d.w || 900) / 2, w.x + (w.d.w || 900) / 2, w.d.h || 220);
   board.items = board.items.filter((i) => i.type !== 'water');
@@ -212,6 +233,7 @@ function mountAll() {
   select(null);
 }
 function addItem(item, { edit = false, quiet = false, inspect = false } = {}) {
+  if (item.type === 'sun') board.world.night = false;
   item.z = Math.max(0, ...board.items.map((i) => i.z)) + 1;
   board.items.push(item);
   mountItem(item);
@@ -232,6 +254,7 @@ function rootItem(item) {
   physics.setAngle(item.id, 0);
 }
 function removeItem(id) {
+  if (byId(id)?.type === 'sun') board.world.night = true;
   board.items = board.items.filter((i) => i.id !== id);
   board.links = board.links.filter((l) => { if (l.a === id || l.b === id) { physics.removeLink(l.id); return false; } return true; });
   physics.remove(id);
@@ -284,6 +307,12 @@ function loop(now) {
   const moved = physics.step(dt);
   const elChanged = elements.update(dt, now);
   devices.update(dt);
+  {
+    const v = camera.viewRect();
+    flora.particles(v, world.clock.get(), atmos.wind, Math.min(3, dt / 16.667));
+    fire.emit(v, Math.min(3, dt / 16.667));
+    if (frame % 10 === 0) world.weather.lights = fire.lights(v);
+  }
   devices.flushPatches((it) => { const el = els.get(it.id); if (el) patch(el, it); });
   if (moved || camDirty) {
     for (const it of board.items) {
@@ -299,7 +328,6 @@ function loop(now) {
   lights.draw(board.items, cam, flashlight ? cursor : null, env);
   elements.draw(cam);
   if (frame % 2 === 0) lights.shadows(board.items, els, env.sun);
-  if (frame % 15 === 0) paintTimebar(env.c);
   if (tool === 'shovel') drawShovelRing();
   if (frame % 6 === 0 || camDirty) minimap.draw(board.items, sizes, lights.darkness);
   if (selected) positionCtxBar();
@@ -317,7 +345,7 @@ let penSeen = false;
 let lp = null; // long-press timer
 let lastMenuAt = 0;
 const gestures = bindGestures(viewport, camera, {
-  shouldPan: (e) => !editing && (tool === 'hand' || e.button === 1 || spaceDown || palmTouch(e) || (!e.target.closest('.it') && tool === 'select' && !nearSun(e))),
+  shouldPan: (e) => !editing && (tool === 'hand' || e.button === 1 || spaceDown || palmTouch(e) || (!e.target.closest('.it') && tool === 'select')),
   onPinchStart: () => { physics.dragEnd(); downInfo = null; stroke = null; erasing = false; clearInk(); cancelLongPress(); },
 });
 let spaceDown = false;
@@ -341,18 +369,13 @@ viewport.addEventListener('pointerdown', (e) => {
 
   if (linking) { finishLink(item); return; }
 
+  // seed bag: plant the chosen species where you tap
+  if (tool === 'seed' && !palmTouch(e)) { plantAt(pt.x, seedSel); return; }
+  if (!item && tool === 'select') emptyDown = { x: e.clientX, y: e.clientY, t: performance.now(), pt };
   // shovel: sculpt the terrain (pressure-sensitive with a pen)
   if (tool === 'shovel' && !palmTouch(e)) {
     capture(e);
     shovel.active = { x: pt.x, y: pt.y, p: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.7, target: GROUND_Y - terrain.surfaceY(pt.x) };
-    return;
-  }
-  // drag the sun (or moon) across the sky to change the time of day
-  if (!item && tool === 'select' && nearSun(e)) {
-    capture(e);
-    sunDrag = true;
-    viewport.classList.add('scrubbing');
-    scrubTo(e.clientX);
     return;
   }
 
@@ -388,7 +411,6 @@ viewport.addEventListener('pointermove', (e) => {
   cursor = { x: e.clientX - r.left, y: e.clientY - r.top };
   if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress();
   if (gestures.pinching) return;
-  if (sunDrag) { scrubTo(e.clientX); return; }
   if (shovel.active) { const q = camera.toWorld(e.clientX, e.clientY); shovel.active.x = q.x; shovel.active.y = q.y; if (e.pointerType === 'pen' && e.pressure > 0) shovel.active.p = e.pressure; return; }
   if (erasing) { eraseAt(camera.toWorld(e.clientX, e.clientY)); return; }
   if (stroke) { const pred = stroke.move(e); drawInk(pred); return; }
@@ -397,7 +419,10 @@ viewport.addEventListener('pointermove', (e) => {
 viewport.addEventListener('pointerleave', () => { if (!downInfo) cursor = null; });
 const endPointer = (e) => {
   cancelLongPress();
-  if (sunDrag) { sunDrag = false; viewport.classList.remove('scrubbing'); commit(); return; }
+  if (emptyDown) {
+    const d = emptyDown; emptyDown = null;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6 && performance.now() - d.t < 450) onEmptyTap(d.pt);
+  }
   if (shovel.active) { shovel.active = null; commit(); return; }
   if (erasing) { erasing = false; if (eraseDirty) { eraseDirty = false; commit(); } return; }
   if (stroke) { finishStroke(); return; }
@@ -425,6 +450,7 @@ viewport.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   if (performance.now() - lastMenuAt < 600) return;
   const el = e.target.closest('.it');
+  if (!el) { const w = camera.toWorld(e.clientX, e.clientY); const pl = flora.hit(w.x, w.y); if (pl) { openPlantMenu(e.clientX, e.clientY, pl); return; } }
   openContextMenu(e.clientX, e.clientY, el && byId(el.dataset.id));
 });
 
@@ -735,7 +761,7 @@ function canvasEntries() {
   };
   const g = physics.gravity;
   const wm = atmos.mode, wv = atmos.manual;
-  const isDay = world.clock.get().isDay;
+  const sun = board.items.find((i) => i.type === 'sun');
   return [
     { label: 'Add here', icon: ICONS.plus, sub: [
       { label: 'Text', icon: ICONS.text, run: at('text', { text: 'Your text', font: 'marker', size: 56 }, {}, { edit: true }) },
@@ -747,17 +773,23 @@ function canvasEntries() {
     ] },
     { label: 'Elements', icon: ICONS.cloud, sub: GALLERY.Elements.map((e) => ({ label: e.name, run: () => placeEntry(e, menuPoint) })) },
     { label: 'Toys', icon: ICONS.ball, sub: GALLERY.Toys.map((e) => ({ label: e.name, run: () => placeEntry(e, menuPoint) })) },
+    { label: 'Plant here', icon: ICONS.plant, sub: SPECIES_CATS.map((cat) => ({ label: cat, sub: Object.entries(SPECIES).filter(([, d]) => d.cat === cat).map(([k, d]) => ({ label: `${SPECIES_ICON[k] || '🌱'} ${d.name}`, run: () => plantAt((menuPoint || viewCenter()).x, k) })) })) },
+    { label: 'Start a fire here', icon: ICONS.fire, run: () => { const x = (menuPoint || viewCenter()).x; if (!fire.ignite(x, 2, world.clock.get(), world.weather.snow || 0)) toast('Too wet or nothing to burn here.', 1800); } },
     { label: 'Paste', icon: ICONS.paste, kbd: 'Ctrl+V', disabled: !clip, run: () => pasteAt(menuPoint || viewCenter()) },
     '-',
     { label: 'World', icon: ICONS.world, sub: [
+      { header: 'Season' },
+      ...['🌸 Spring', '☀️ Summer', '🍂 Autumn', '❄️ Winter'].map((l, i) => ({ label: l, checked: world.clock.season === i, run: () => { world.clock.setSeason(i); toast(l, 1200); commit(); } })),
+      { header: 'Nature speed' },
+      ...[[0, 'Paused'], [1, 'Normal'], [10, 'Fast ×10'], [60, 'Very fast ×60']].map(([v, l]) => ({ label: l, checked: world.clock.speed === v, run: () => { world.clock.setSpeed(v); toast(`Plants, water and fire: ${l.toLowerCase()}`, 1600); commit(); } })),
+      '-',
       { header: 'Gravity' },
       ...['on', 'low', 'off'].map((m) => ({ label: { on: 'Full gravity', low: 'Moon gravity', off: 'Zero gravity' }[m], checked: g === m, run: () => setGravity(m) })),
       '-', { header: 'Wind' },
       { label: 'Auto (seasons + weather)', checked: wm === 'auto', run: () => { atmos.setMode('auto'); commit(); toast('Wind follows the seasons and weather.', 1600); } },
       ...[[0.001, 'Calm'], [1, 'Breeze →'], [-1, 'Breeze ←'], [3, 'Gale →'], [-3, 'Gale ←']].map(([v, l]) => ({ label: l, checked: wm === 'manual' && wv === v, run: () => { atmos.setMode('manual', v); commit(); toast(`Wind: ${l}`, 1400); } })),
       '-',
-      { label: isDay ? 'Jump to night' : 'Jump to morning', run: () => toggleDay() },
-      { label: world.clock.state.mode === 'sim' ? 'Back to real time' : 'Simulate time', run: () => { world.clock.setMode(world.clock.state.mode === 'sim' ? 'real' : 'sim'); paintTimebar(world.clock.get()); commit(); } },
+      { label: sun ? 'Night (remove the sun)' : 'Day (add the sun)', run: () => toggleDay() },
     ] },
     { label: 'Fit everything', icon: ICONS.fit, kbd: '0', run: fitAll },
     { label: 'Take a snapshot', icon: ICONS.camera, kbd: 'C', run: takeSnapshot },
@@ -773,10 +805,9 @@ function digPond(x) {
   toast('Dug a pond. Rain keeps it full; in the sun it slowly evaporates and soaks away.', 3200);
 }
 function toggleDay() {
-  const day = world.clock.get().isDay;
-  world.clock.setTimeOfDay(day ? 23 * 60 : 12 * 60);
-  toast(day ? 'Good night 🌙 Lamps, torches and fires still glow.' : 'Good morning! ☀️');
-  paintTimebar(world.clock.get());
+  const sun = board.items.find((i) => i.type === 'sun');
+  if (sun) { removeItem(sun.id); toast('Good night 🌙 Lamps, torches and fires still glow.'); }
+  else { const c = viewCenter(-0.35); addItem(makeItem('sun', c.x, Math.max(-800, c.y), {}, { s: 1.4 })); toast('Good morning! ☀️'); }
   commit();
 }
 function setGravity(m) { physics.setGravity(m); syncGravityUI(); commit(); sfx.whoosh(); }
@@ -910,6 +941,7 @@ const GALLERY = {
     { name: '🌸 Flower', svg: plantSvg('flower'), type: 'plant', d: { species: 'flower', growth: 0.4 } },
     { name: '🌻 Sunflower', svg: plantSvg('sunflower'), type: 'plant', d: { species: 'sunflower', growth: 0.4 } },
     { name: '🌵 Cactus', svg: plantSvg('cactus'), type: 'plant', d: { species: 'cactus', growth: 0.5 } },
+    { name: '☀️ Sun', svg: OBJECTS.sun, type: 'sun', d: {}, x: { s: 1.4 } },
     { name: '💡 Lamp', svg: OBJECTS.lamp, type: 'lamp', d: { temp: 'warm' } },
     { name: '🔦 Torch', svg: OBJECTS.torch, type: 'torch', d: { beam: 0.42 }, x: { a: 0.3 } },
   ],
@@ -954,6 +986,7 @@ function placeEntry(e, at) {
   const d = JSON.parse(JSON.stringify(e.d || {}));
   if (e.type === 'spinner' && !d.labels && DATA) d.labels = DATA.games.map((g) => g.title.split(' ')[0]).slice(0, 6);
   if (e.type === '$pond') { digPond(p.x); return; }
+  if (e.type === 'sun' && board.items.some((i) => i.type === 'sun')) { const s0 = board.items.find((i) => i.type === 'sun'); physics.moveTo(s0.id, p.x, Math.min(groundAt(p.x, 200), p.y)); select(s0.id); toast('There is only one sun: moved it here. Higher = brighter.'); commit(); return; }
   const y = Math.min(groundAt(p.x, 120), p.y);
   addItem(makeItem(e.type, p.x + (at ? 0 : (Math.random() - 0.5) * 160), y, d, { ...(e.x || {}) }), { edit: !!e.edit, inspect: !!e.inspect });
   if (e.tip) toast(e.tip, 3200);
@@ -989,16 +1022,17 @@ function buildUI() {
     ['hand', ICONS.hand, 'Pan (H or hold Space)'],
     ['pen', ICONS.pen, 'Draw & write (D) · works with pen tablets'],
     '|',
-    ['text', ICONS.text, 'Add text (T)'],
-    ['note', ICONS.note, 'Add sticky note (N)'],
-    ['card', ICONS.card, 'Add card (K)'],
+    ['text', ICONS.text, 'Text: drag it onto the board (T)'],
+    ['note', ICONS.note, 'Sticky note: drag it onto the board (N)'],
+    ['card', ICONS.card, 'Card: drag it onto the board (K)'],
     ['gallery', ICONS.sticker, 'Gallery: stickers, elements, toys (G)'],
-    ['photo', ICONS.photo, 'Add your photo'],
+    ['photo', ICONS.photo, 'Your photo: drag onto the board, then pick a picture'],
     '|',
-    ['cloud', ICONS.cloud, 'Rain cloud'],
-    ['fire', ICONS.fire, 'Campfire'],
+    ['cloud', ICONS.cloud, 'Rain cloud: drag it onto the board'],
+    ['fire', ICONS.fire, 'Campfire: drag it onto the board'],
     ['water', ICONS.water, 'Water & air: ponds, bores, pipes, tanks, sprinklers, kites…'],
     ['elements', ICONS.plant, 'More elements: snow, storm, fan, magnet, plants…'],
+    ['seed', ICONS.seed, 'Seed bag: plant trees, flowers, crops… (Y)'],
     ['shovel', ICONS.shovel, 'Shovel: sculpt hills, dig, paint sand / clay / rock (B)'],
     '|',
     ['camera', ICONS.camera, 'Camera snapshot (C)'],
@@ -1018,7 +1052,7 @@ function buildUI() {
   snd.addEventListener('click', toggleSound);
   buildPenBar();
   buildShovelBar();
-  buildTimebar();
+  buildSeedBar();
   $('[data-ink-toggle]').innerHTML = ICONS.palette;
   $('[data-ink-toggle]').addEventListener('click', () => { setInk(!document.body.classList.contains('ink')); sfx.click(); toast(document.body.classList.contains('ink') ? 'Ink world: all color removed.' : 'Color world.', 1400); });
   try { setInk(localStorage.getItem('fewclicks:ink') === '1'); } catch { /* ignore */ }
@@ -1030,39 +1064,52 @@ function buildUI() {
     if (!b) return;
     sfx.click();
     const t = b.dataset.tool;
-    if (['select', 'hand', 'pen', 'shovel'].includes(t)) { setTool(t); return; }
-    const c = viewCenter();
-    if (t === 'text') addItem(makeItem('text', c.x, c.y, { text: 'Your text', font: 'marker', size: 56 }), { edit: true });
-    if (t === 'note') addItem(makeItem('note', c.x, c.y, { text: 'Write something…', paper: 'classic' }, { a: (Math.random() - 0.5) * 0.08 }), { edit: true });
-    if (t === 'card') addItem(makeItem('card', c.x, c.y, { title: 'New card', body: 'Double-click to edit me.', style: 'white' }), { inspect: true });
+    if (['select', 'hand', 'pen', 'shovel', 'seed'].includes(t)) { setTool(t); return; }
     if (t === 'gallery') toggleGallery('Stickers');
     if (t === 'elements') toggleGallery('Elements');
-    if (t === 'photo') { pendingImageFor = null; $('[data-file]').click(); }
     if (t === 'camera') takeSnapshot();
-    if (t === 'cloud') placeEntry(GALLERY.Elements[0]);
-    if (t === 'fire') placeEntry(GALLERY.Elements[3]);
     if (t === 'water') toggleGallery('Water');
+    if (DRAG_TOOLS.has(t)) {
+      // things are placed by dragging them onto the board; Enter/Space (keyboard) drops at the centre
+      if (e.detail === 0) toolPlace(t, null);
+      else if (!dndJustDropped()) dragHint(b);
+    }
   });
-  g.addEventListener('pointerdown', (e) => e.stopPropagation());
+  $('[data-tools]').addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('[data-tool]');
+    if (b && DRAG_TOOLS.has(b.dataset.tool)) startDrag(e, b, (at) => toolPlace(b.dataset.tool, at));
+  });
+  g.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    const src = e.target.closest('[data-stk], [data-entry], [data-reuse]');
+    if (src) startDrag(e, src, (at) => galleryPlace(src, at));
+  });
   g.addEventListener('click', (e) => {
     const tab = e.target.closest('[data-tab]');
     if (tab) { showTab(tab.dataset.tab); return; }
     if (e.target.closest('[data-gclose]')) { g.hidden = true; return; }
-    const stk = e.target.closest('[data-stk]');
-    const at = galleryAt;
-    if (stk) { const c = at || viewCenter(-0.38); addItem(makeItem('sticker', c.x + (at ? 0 : (Math.random() - 0.5) * 300), Math.min(groundAt(c.x, 100), c.y), { key: stk.dataset.stk }, { a: (Math.random() - 0.5) * 0.6 })); return; }
-    const en = e.target.closest('[data-entry]');
-    if (en) { const [tabName, i] = en.dataset.entry.split(':'); placeEntry(GALLERY[tabName][+i], at); if (GALLERY[tabName][+i].edit || GALLERY[tabName][+i].inspect) g.hidden = true; return; }
-    if (e.target.closest('[data-upload]')) { pendingImageFor = null; $('[data-file]').click(); return; }
-    const re = e.target.closest('[data-reuse]');
-    if (re) { const src = g.querySelector('.g-body')._srcs[+re.dataset.reuse]; const c = at || viewCenter(-0.1); addItem(makeItem('photo', c.x, Math.min(groundAt(c.x, 150), c.y), { src, caption: '' }, { a: (Math.random() - 0.5) * 0.1 })); }
+    if (e.target.closest('[data-upload]')) { pendingImageFor = null; pendingPhotoAt = null; $('[data-file]').click(); return; }
+    const src = e.target.closest('[data-stk], [data-entry], [data-reuse]');
+    if (!src) return;
+    if (e.detail === 0) galleryPlace(src, galleryAt);
+    else if (!dndJustDropped()) dragHint(src);
   });
+  function galleryPlace(src, at) {
+    galleryAt = null;
+    const stk = src.matches('[data-stk]') ? src : null;
+    const en = src.matches('[data-entry]') ? src : null;
+    const re = src.matches('[data-reuse]') ? src : null;
+    if (stk) { const c = at || viewCenter(-0.38); addItem(makeItem('sticker', c.x + (at ? 0 : (Math.random() - 0.5) * 300), Math.min(groundAt(c.x, 100), c.y), { key: stk.dataset.stk }, { a: (Math.random() - 0.5) * 0.6 })); return; }
+    if (en) { const [tabName, i] = en.dataset.entry.split(':'); placeEntry(GALLERY[tabName][+i], at); return; }
+    if (re) { const img = g.querySelector('.g-body')._srcs[+re.dataset.reuse]; const c = at || viewCenter(-0.1); addItem(makeItem('photo', c.x, Math.min(groundAt(c.x, 150), c.y), { src: img, caption: '' }, { a: (Math.random() - 0.5) * 0.1 })); }
+  }
   $('[data-file]').addEventListener('change', async (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
-    await addPhotoFile(f, pendingImageFor);
+    await addPhotoFile(f, pendingImageFor, pendingPhotoAt);
     pendingImageFor = null;
+    pendingPhotoAt = null;
   });
   $('[data-undo]').addEventListener('click', undo);
   $('[data-redo]').addEventListener('click', redo);
@@ -1085,6 +1132,7 @@ function buildUI() {
     board = normalize(seedBoard(DATA));
     world.load(board.world?.clock);
     atmos.load(board.world?.atmos);
+    weather.load(board.world?.weather);
     mountAll();
     physics.setGravity('on');
     syncGravityUI();
@@ -1100,7 +1148,6 @@ function buildUI() {
   info.addEventListener('toggle', () => { if (info.open) { const kb = Math.round(JSON.stringify(serialize()).length * 2 / 1024); $('[data-storage]').textContent = `This board uses about ${kb} KB of your browser's local storage.`; } });
 
   document.addEventListener('pointerdown', (e) => {
-    if (!e.target.closest('[data-gallery], [data-tool="gallery"], [data-tool="elements"]')) $('[data-gallery]').hidden = true;
   });
   // drop or paste images: they become photos (still local only)
   viewport.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.items || [])].some((i) => i.kind === 'file')) { e.preventDefault(); viewport.classList.add('dropping'); } });
@@ -1173,8 +1220,9 @@ function setTool(t) {
   viewport.dataset.tool = t;
   $('[data-penbar]').hidden = t !== 'pen';
   $('[data-shovelbar]').hidden = t !== 'shovel';
+  $('[data-seedbar]').hidden = t !== 'seed';
   if (t !== 'shovel') { const c = ink.getContext('2d'); c.clearRect(0, 0, ink.width, ink.height); }
-  if (t === 'pen' || t === 'shovel') select(null);
+  if (t === 'pen' || t === 'shovel' || t === 'seed') select(null);
 }
 function setFlash(on) {
   flashlight = on;
@@ -1211,23 +1259,124 @@ function toast(text, ms = 2600) {
   toastT = setTimeout(() => t.classList.remove('show'), ms);
 }
 
-// ---------------- world: time bar, sun scrubbing, shovel, ink mode ----------------
-let sunDrag = false;
-const shovel = { mode: 'raise', size: 180, active: null };
-function nearSun(e) {
-  const s = world.sky.sun;
-  if (!s) return false;
-  const r = viewport.getBoundingClientRect();
-  return Math.hypot(e.clientX - r.left - s.x, e.clientY - r.top - s.y) < Math.max(34, s.r * 1.8);
+// ---------------- drag & drop: place things exactly where you drop them ----------------
+const DRAG_TOOLS = new Set(['text', 'note', 'card', 'photo', 'cloud', 'fire']);
+let dnd = null;
+let dndDropAt = 0;
+let pendingPhotoAt = null;
+const dndJustDropped = () => performance.now() - dndDropAt < 400;
+function toolPlace(t, at) {
+  const c = at || viewCenter();
+  const y = Math.min(groundAt(c.x, 60), c.y);
+  if (t === 'text') addItem(makeItem('text', c.x, y, { text: 'Your text', font: 'marker', size: 56 }), { edit: true });
+  if (t === 'note') addItem(makeItem('note', c.x, y, { text: 'Write something…', paper: 'classic' }, { a: (Math.random() - 0.5) * 0.08 }), { edit: true });
+  if (t === 'card') addItem(makeItem('card', c.x, y, { title: 'New card', body: 'Double-click to edit me.', style: 'white' }), { inspect: true });
+  if (t === 'photo') { pendingImageFor = null; pendingPhotoAt = at; $('[data-file]').click(); }
+  if (t === 'cloud') placeEntry(GALLERY.Elements[0], at || viewCenter(-0.3));
+  if (t === 'fire') placeEntry(GALLERY.Elements[3], at || viewCenter());
 }
-function scrubTo(clientX) {
-  const r = viewport.getBoundingClientRect();
+function dragHint(el) {
+  el.classList.remove('wiggle'); void el.offsetWidth; el.classList.add('wiggle');
+  toast('Drag it onto the board to place it.', 1600);
+}
+function startDrag(e, src, place) {
+  if (e.button > 0) return;
+  dnd = { id: e.pointerId, x: e.clientX, y: e.clientY, src, place, moved: false, ghost: null };
+}
+addEventListener('pointermove', (e) => {
+  if (!dnd || e.pointerId !== dnd.id) return;
+  if (!dnd.moved) {
+    if (Math.hypot(e.clientX - dnd.x, e.clientY - dnd.y) < 7) return;
+    dnd.moved = true;
+    const gh = document.createElement('div');
+    gh.className = 'dnd-ghost';
+    gh.innerHTML = (dnd.src.querySelector('svg, img, .g-art, .mini-note, .mini-card, .mini-bubble, .mini-txt') || dnd.src).outerHTML;
+    document.body.appendChild(gh);
+    dnd.ghost = gh;
+    document.body.classList.add('dragging-new');
+    try { dnd.src.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    sfx.tick();
+  }
+  dnd.ghost.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+  const over = overBoard(e.clientX, e.clientY);
+  dnd.ghost.classList.toggle('ok', over);
+});
+function overBoard(x, y) {
+  const el = document.elementFromPoint(x, y);
+  return !!el && !!el.closest('[data-viewport]');
+}
+const endDnd = (e) => {
+  if (!dnd || e.pointerId !== dnd.id) return;
+  const d = dnd;
+  dnd = null;
+  document.body.classList.remove('dragging-new');
+  d.ghost?.remove();
+  if (!d.moved) return;
+  dndDropAt = performance.now();
+  if (e.type === 'pointerup' && overBoard(e.clientX, e.clientY)) d.place(camera.toWorld(e.clientX, e.clientY));
+  else toast('Drop it on the board to place it.', 1400);
+};
+addEventListener('pointerup', endDnd);
+addEventListener('pointercancel', endDnd);
+
+// ---------------- plants ----------------
+let emptyDown = null;
+let seedSel = 'sunflower';
+function stageOf(p) { const sp = SPECIES[p.sp]; const k = p.age / sp.days; return sp.dead ? 'dead' : k < 0.15 ? 'seedling' : k < 0.5 ? 'young' : k < 1 ? 'growing' : 'mature'; }
+function plantInfo(p) {
+  const sp = SPECIES[p.sp];
+  const m = Math.round(water.moistureAt(p.x) * 100);
+  return `${SPECIES_ICON[p.sp] || '🌱'} ${sp.name} · ${stageOf(p)} · health ${Math.round(p.hp * 100)}% · soil ${m}% wet${p.burnt > 0.5 ? ' · burnt (regrowing)' : ''}${p.dry > 0.4 ? ' · thirsty!' : ''}`;
+}
+function onEmptyTap(pt) {
+  const p = flora.hit(pt.x, pt.y);
+  if (p) { toast(plantInfo(p), 3200); sfx.tick(); }
+}
+function plantAt(x, sp) {
+  const def = SPECIES[sp];
+  if (!def) return;
+  if (def.aquatic ? water.depthAt(x) < 10 : water.depthAt(x) > 6) { toast(def.aquatic ? `${def.name} needs a pond: plant it in water.` : 'Too wet here: plant on dry ground.', 2000); return; }
+  if (terrain.matAt(x) === 'rock') { toast('Nothing grows on rock.', 1600); return; }
+  flora.add(sp, x, { age: def.days * 0.22 });
+  sfx.pop(0.8);
+  commit();
+}
+function harvestPlant(p) {
+  const sp = SPECIES[p.sp];
+  const n = sp.form === 'vinecrop' ? 2 : 3;
+  for (let i = 0; i < n; i++) { const b = flora.bbox(p); addItem(makeItem('fruit', p.x + (Math.random() - 0.5) * b.w * 0.6, b.y0 + b.h * 0.4, { color: sp.fruit, kind: p.sp, big: (sp.fruitSize || 0.3) > 0.8 }, { pin: null }), { quiet: true }); }
+  select(null);
+  sfx.coin();
+  toast(`Harvested ${sp.name.toLowerCase()} fruit!`, 1600);
+}
+function openPlantMenu(x, y, p) {
+  const sp = SPECIES[p.sp];
   const c = world.clock.get();
-  const sx = Math.max(-1.3, Math.min(1.3, ((clientX - r.left) / r.width - 0.5) / 0.44));
-  const H = sx * c.H0;
-  world.clock.setTimeOfDay(((H / (2 * Math.PI)) + 0.5) * 1440);
-  paintTimebar(world.clock.get());
+  const fruity = sp.fruit && sp.fruitSeason?.includes(c.seasonIdx) && flora.size(p) > 0.7 && p.burnt < 0.5;
+  menu.open(x, y, [
+    { header: `${sp.name} · ${stageOf(p)}` },
+    { label: 'Info', icon: ICONS.info, run: () => toast(plantInfo(p), 3600) },
+    { label: 'Water it', icon: ICONS.water, run: () => { flora.waterPlant(p); sfx.splash(); commit(); } },
+    { label: 'Harvest', icon: ICONS.plant, disabled: !fruity, run: () => harvestPlant(p) },
+    { label: 'Prune', icon: ICONS.smaller, run: () => { p.age = Math.max(sp.days * 0.3, p.age * 0.8); commit(); } },
+    { label: 'Light it on fire', icon: ICONS.fire, run: () => { if (!fire.ignite(p.x, 2, c, world.weather.snow || 0)) toast('Too wet to burn.', 1500); } },
+    '-',
+    { label: 'Dig it up', icon: ICONS.trash, danger: true, run: () => { flora.remove(p.id); sfx.whoosh(); commit(); } },
+  ]);
 }
+function buildSeedBar() {
+  const bar = $('[data-seedbar]');
+  let cat = 'Flowers';
+  const paint = () => {
+    bar.innerHTML = `<div class="sb-cats">${SPECIES_CATS.map((c) => `<button type="button" data-scat="${c}" aria-pressed="${c === cat}">${c}</button>`).join('')}</div><div class="sb-list">${Object.entries(SPECIES).filter(([, d]) => d.cat === cat).map(([k, d]) => `<button type="button" data-sp="${k}" aria-pressed="${k === seedSel}" title="${d.name}"><span>${SPECIES_ICON[k] || '🌱'}</span>${d.name}</button>`).join('')}</div>`;
+  };
+  bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.scat) cat = b.dataset.scat; if (b.dataset.sp) seedSel = b.dataset.sp; sfx.tick(); paint(); });
+  bar.addEventListener('pointerdown', (e) => e.stopPropagation());
+  paint();
+}
+
+// ---------------- world: time bar, sun scrubbing, shovel, ink mode ----------------
+const shovel = { mode: 'raise', size: 180, active: null };
 function applyShovel(dt) {
   const a = shovel.active;
   const k = Math.min(3, dt / 16.667) * (a.p ?? 0.7) * (shovel.mode === 'raise' || shovel.mode === 'lower' ? 0.55 : 1);
@@ -1260,51 +1409,6 @@ function buildShovelBar() {
   bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.sm) shovel.mode = b.dataset.sm; if (b.dataset.ss) shovel.size = +b.dataset.ss; sfx.tick(); paint(); });
   bar.addEventListener('pointerdown', (e) => e.stopPropagation());
   paint();
-}
-function buildTimebar() {
-  const tb = $('[data-timebar]');
-  tb.innerHTML = `<button type="button" class="tb-main" data-tb-open aria-expanded="false" title="World time"><span class="tb-ic" data-tb-ic aria-hidden="true"></span><b data-tb-time>--:--</b><span class="tb-meta" data-tb-meta></span></button>
-    <div class="tb-ctl"><button type="button" data-tb-mode title="Real time / Simulate"></button><button type="button" data-tb-play aria-label="Pause / play"></button><button type="button" data-tb-speed title="Speed"></button></div>
-    <div class="tb-panel" data-tb-panel hidden>
-      <label class="row"><span>Time of day</span><input type="range" min="0" max="1439" step="1" data-tb-scrub aria-label="Time of day"></label>
-      <div class="row"><span>Season</span><div class="seg2" data-tb-seasons>${['Spring', 'Summer', 'Autumn', 'Winter'].map((n, i) => `<button type="button" data-season="${i}" role="radio">${['🌸', '☀️', '🍂', '❄️'][i]} ${n}</button>`).join('')}</div></div>
-      <p class="tb-hint">Tip: drag the sun or moon across the sky. Real time follows your clock and today’s date.</p>
-    </div>`;
-  tb.addEventListener('pointerdown', (e) => e.stopPropagation());
-  tb.addEventListener('click', (e) => {
-    const c = world.clock;
-    if (e.target.closest('[data-tb-open]')) { const p = tb.querySelector('[data-tb-panel]'); p.hidden = !p.hidden; e.target.closest('[data-tb-open]').setAttribute('aria-expanded', String(!p.hidden)); }
-    if (e.target.closest('[data-tb-mode]')) { c.setMode(c.state.mode === 'sim' ? 'real' : 'sim'); toast(c.state.mode === 'sim' ? 'Simulating time. Use the speed button to fast-forward.' : 'Back to real time: your clock and today’s season.', 2600); }
-    if (e.target.closest('[data-tb-play]')) { if (c.state.mode !== 'sim') c.setMode('sim'); c.setPaused(!c.state.paused); }
-    if (e.target.closest('[data-tb-speed]')) { if (c.state.mode !== 'sim') c.setMode('sim'); const i = SPEEDS.indexOf(c.state.speed); c.setSpeed(SPEEDS[(i + 1) % SPEEDS.length]); c.setPaused(false); }
-    const se = e.target.closest('[data-season]');
-    if (se) { c.setSeason(+se.dataset.season); }
-    sfx.click();
-    paintTimebar(c.get());
-    commit();
-  });
-  tb.addEventListener('input', (e) => { if (e.target.matches('[data-tb-scrub]')) { world.clock.setTimeOfDay(+e.target.value); paintTimebar(world.clock.get()); } });
-  tb.addEventListener('change', (e) => { if (e.target.matches('[data-tb-scrub]')) commit(); });
-}
-function paintTimebar(c) {
-  const tb = $('[data-timebar]');
-  if (!tb.firstChild) return;
-  const st = world.clock.state;
-  const moonIc = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'][Math.round(c.phase * 8) % 8];
-  tb.querySelector('[data-tb-ic]').textContent = c.isDay ? (c.sunAltDeg < 8 ? '🌅' : '☀️') : moonIc;
-  tb.querySelector('[data-tb-time]').textContent = c.label;
-  const when = st.mode === 'sim' ? `Day ${c.day + 1}` : new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
-  const wl = atmos.label();
-  tb.querySelector('[data-tb-meta]').textContent = `${when} · ${c.season} · ${Math.round(c.temp)}°C · 💨 ${wl.kmh} km/h ${wl.arrow}`;
-  tb.querySelector('[data-tb-meta]').title = wl.name;
-  tb.querySelector('[data-tb-mode]').textContent = st.mode === 'sim' ? 'SIM' : 'REAL';
-  tb.querySelector('[data-tb-mode]').setAttribute('aria-pressed', String(st.mode === 'sim'));
-  tb.querySelector('[data-tb-play]').innerHTML = st.mode === 'sim' && !st.paused ? '⏸' : '▶';
-  tb.querySelector('[data-tb-speed]').textContent = `${st.speed}×`;
-  tb.classList.toggle('real', st.mode !== 'sim');
-  const scrub = tb.querySelector('[data-tb-scrub]');
-  if (document.activeElement !== scrub) scrub.value = String(Math.round(c.minutes));
-  tb.querySelectorAll('[data-season]').forEach((b) => b.setAttribute('aria-checked', String(+b.dataset.season === c.seasonIdx)));
 }
 function setInk(on) {
   document.body.classList.toggle('ink', on);
@@ -1349,6 +1453,7 @@ addEventListener('keydown', (e) => {
   if (map[k]) { setTool(map[k]); return; }
   if (k === 'e') { setTool('pen'); penOpts.tool = 'eraser'; $('[data-penbar] [data-pt="eraser"]')?.click(); return; }
   if (k === 'b') { setTool('shovel'); return; }
+  if (k === 'y') { setTool('seed'); return; }
   if (k === 'i') { $('[data-ink-toggle]').click(); return; }
   if (k === 't') $('[data-tool="text"]').click();
   if (k === 'n') $('[data-tool="note"]').click();
@@ -1365,6 +1470,6 @@ addEventListener('beforeunload', () => save(true));
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(true); });
 
 // test hook for local automated checks (only with ?debug in the URL; nothing leaves the browser)
-if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, world, terrain, water, atmos, devices, get board() { return board; }, byId, select, commit };
+if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, world, terrain, water, atmos, devices, flora, fire, weather, get board() { return board; }, byId, select, commit };
 
 init();

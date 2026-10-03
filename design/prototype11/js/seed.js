@@ -13,6 +13,7 @@ export function seedBoard({ games, studio, team, news }) {
   const items = [];
   const add = (type, x, y, d, extra = {}) => { const it = makeItem(type, x, y, d, extra); items.push(it); return it; };
 
+  add('sun', 3200, 330, {}, { s: 1.4 });
   add('title', CENTER.x, CENTER.y, { text: 'FewClicks Studios', font: 'bubbles', size: 150, sub: studio.tagline || 'Games you can love in a few clicks.' }, { pin: 'lock' });
 
   // games on an ellipse around the title
@@ -106,5 +107,23 @@ export function seedBoard({ games, studio, team, news }) {
   t.paint('dirt', 6200, 6700);
   w.pond(6850, 7800, 260, 0.85);
   w.pond(-2650, -2050, 120, 0.8);
-  return { version: 3, gravity: 'on', cam: null, world: { wind: 0, clock: { mode: 'real' } }, terrain: t.serialize(), water: w.serialize(), links, items };
+  // plants: a forest on the western hills, palms by the fire pit, an orchard + garden by the sprinkler,
+  // lilies and reeds in the pond, a desert on the rocky eastern hill, wild flowers everywhere
+  const flora = [];
+  let r = 1;
+  const rnd = () => { const v = Math.sin(r++ * 12.9898) * 43758.5453; return v - Math.floor(v); };
+  const P = (sp, x, k = 1) => flora.push([sp, Math.round(x), +(k * ({ oak: 9, birch: 6, maple: 8, cherry: 6, apple: 7, pine: 8, cypress: 7, palm: 8, willow: 7, cactus: 10, bush: 3 }[sp] || 2) * (0.7 + rnd() * 0.5)).toFixed(2), 1, +rnd().toFixed(4), 0]);
+  for (let x = -5000; x < -1000; x += 170 + rnd() * 160) P(['pine', 'pine', 'birch', 'oak', 'maple'][Math.floor(rnd() * 5)], x);
+  for (let x = -4800; x < -1200; x += 260 + rnd() * 200) P(['fern', 'bush', 'mushroom', 'tallgrass'][Math.floor(rnd() * 4)], x);
+  P('palm', -820); P('palm', 680, 0.9); P('aloe', -600);
+  [['cherry', 900], ['apple', 1180], ['oak', 5250, 0.8], ['maple', 4600, 0.9], ['birch', 1550, 0.8]].forEach(([sp, x, k]) => P(sp, x, k ?? 1));
+  [['sunflower', 6380], ['sunflower', 6450], ['corn', 6540], ['corn', 6600], ['pumpkin', 6250], ['tomato', 6700], ['carrot', 6200], ['strawberry', 6150], ['wheat', 6760]].forEach(([sp, x]) => P(sp, x));
+  P('willow', 6720, 0.9); P('reeds', 6880); P('reeds', 7740); P('lily', 7150); P('lily', 7420); P('lily', 7600);
+  for (let x = 9300; x < 12400; x += 300 + rnd() * 300) P(['cactus', 'cactus', 'aloe', 'tallgrass'][Math.floor(rnd() * 4)], x);
+  P('cypress', 8200); P('cypress', 8350); P('deadtree', 12900, 1);
+  for (let x = 1400; x < 9000; x += 240 + rnd() * 300) P(['tulip', 'daisy', 'poppy', 'dandelion', 'lavender', 'clover', 'tallgrass', 'bush', 'rose', 'blueberry'][Math.floor(rnd() * 10)], x);
+  // the old potted plants in the weather corner become planted in the ground
+  for (let i = items.length - 1; i >= 0; i--) if (items[i].type === 'plant') { P(items[i].d.species === 'cactus' ? 'cactus' : 'sunflower', items[i].x); items.splice(i, 1); }
+
+  return { version: 3, gravity: 'on', cam: null, world: { clock: { season: 1, speed: 1 } }, terrain: t.serialize(), water: w.serialize(), flora, links, items };
 }

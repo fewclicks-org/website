@@ -5,7 +5,7 @@
 import { pinOffset } from './items.js';
 
 const GRAVITY = { on: 1, low: 0.25, off: 0 };
-const CIRCLES = new Set(['ball', 'coin', 'clock']);
+const CIRCLES = new Set(['ball', 'coin', 'clock', 'fruit']);
 
 export function createPhysics({ terrain, reduced = false }) {
   const groundY = terrain.groundY;
