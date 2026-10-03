@@ -2,7 +2,7 @@
 
 Website for **FewClicks**, a game studio making games you can love in a few clicks. Contact: admin@fewclicks.org
 
-We are currently exploring **10 prototype designs**. The site root (`index.html`) is a gallery linking to each prototype. Once we pick a winner, it becomes the real site.
+We have shortlisted **4 prototype designs** (1 Bubble Pop Planet, 2 Physics Playground, 6 Studio Portfolio · Lens, 8 Chapter · Cinematic). The site root (`index.html`) is a gallery linking to each one. Once we pick a winner, it becomes the real site.
 
 ## Structure
 
@@ -14,7 +14,7 @@ assets/games/<id>/      Game icons, covers, screenshots, trailers
 assets/team/            Team avatars
 design/shared/js/       Shared code used by every prototype (data loading, sound, SEO, helpers)
 design/vendor/          Vendored libraries (three.js, GSAP, Matter.js)
-design/prototypeN/      Each prototype: index.html (home), games.html (list), game.html?id=… (detail)
+design/prototypeN/      Prototypes 1 & 2: index.html, games.html, game.html?id=…  ·  6 & 8: single page (game view at index.html#game/<id>)
 ```
 
 Plain HTML/CSS/JS with no build step. GitHub Pages serves the files as they are.

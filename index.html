@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FewClicks Prototype Lab</title>
-  <meta name="description" content="Ten website concepts for FewClicks game studio. Pick your favourite!">
+  <meta name="description" content="Shortlisted website concepts for FewClicks game studio.">
   <meta name="robots" content="noindex, nofollow">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='44' fill='%23ff5fa2'/><path d='M38 28 L38 72 L49 61 L57 78 L64 75 L56 58 L71 58Z' fill='white'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -59,7 +59,7 @@
           FewClicks
         </div>
         <h1>Prototype <span>Lab</span></h1>
-        <p class="lead">Ten totally different website concepts for the FewClicks game studio. Each one reads the same game data from <code>data/games.json</code>. Click a live prototype to play with it.</p>
+        <p class="lead">The shortlist: four website concepts for the FewClicks game studio. Each one reads the same game data from <code>data/games.json</code>. Click a live prototype to play with it.</p>
       </div>
       <div class="progress" id="progress"></div>
     </header>
@@ -76,14 +76,8 @@
     const PROTOTYPES = [
       { n: 1, name: 'Bubble Pop Planet', status: 'live', color: '#ff5fa2', text: 'Glossy 3D candy bubbles. Pop the giant bubble to start, then pop everything else for points.' },
       { n: 2, name: 'Physics Playground', status: 'live', color: '#ffd23f', text: 'The letters F-E-W-C-L-I-C-K-S fall with real physics. Grab, throw and stack the whole page.' },
-      { n: 3, name: 'Console Home Screen', status: 'live', color: '#4cc9ff', text: 'Boot up a console dashboard you can drive with a keyboard or a real gamepad.' },
-      { n: 4, name: 'Few Clicks Challenge', status: 'live', color: '#ffb020', text: 'The site is the game: a click counter, XP and achievements. Can you see it all in 5 clicks?' },
-      { n: 5, name: 'Sticker Scrapbook', status: 'live', color: '#ff8a3d', text: 'A hand-drawn notebook with peelable stickers, taped polaroids and doodles.' },
       { n: 6, name: 'Studio Portfolio · Lens', status: 'live', color: '#d4ff3a', text: 'Professional single page: scramble loader, a cursor lens that reveals color on a grayscale art wall, and an infinite draggable canvas of games.' },
-      { n: 7, name: 'Nova · 3D Flythrough', status: 'live', color: '#49e3ff', text: 'Single page where you scroll through a WebGL corridor of glowing game posters, then tilt-cards and glass panels.' },
       { n: 8, name: 'Chapter · Cinematic', status: 'live', color: '#e8a33d', text: 'A scroll-driven film: leader countdown, letterbox reveal, knockout title and games as pinned chapters that expand to full screen.' },
-      { n: 9, name: 'Spec · Swiss Blueprint', status: 'live', color: '#ff3b1f', text: 'Light, precise single page: grid-drawing loader, a variable-weight wordmark that reacts to your cursor, a sortable spec-sheet of games and data-sheet game views.' },
-      { n: 10, name: 'Launch · AAA', status: 'live', color: '#ff2d75', text: 'Bold AAA-launch single page: Press Start loader, liquid WebGL key art that dissolves between games, bento game grid and a character-select team.' },
     ];
     const label = { live: 'Live: play it', next: 'Up next', planned: 'Planned' };
     document.getElementById('grid').innerHTML = PROTOTYPES.map((p) => `
