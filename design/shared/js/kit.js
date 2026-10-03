@@ -56,7 +56,7 @@ export function bindFilters({ root = document, games, categories, render, onChan
     if (state.query) p.set('q', state.query);
     if (state.sort !== 'featured') p.set('sort', state.sort);
     const qs = p.toString();
-    history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
+    history.replaceState(null, '', `${qs ? `?${qs}` : location.pathname}${location.hash}`);
   };
   const update = (src) => {
     sync();
