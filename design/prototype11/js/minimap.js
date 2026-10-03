@@ -1,6 +1,7 @@
 // Minimap: everything on the (infinite) canvas in miniature, plus the current view. Click or drag to move.
 
-export function createMinimap(canvas, camera, { groundY }) {
+export function createMinimap(canvas, camera, { terrain }) {
+  const groundY = terrain.groundY;
   const ctx = canvas.getContext('2d');
   const dpr = Math.min(devicePixelRatio || 1, 2);
   let cw = 0, ch = 0;
@@ -31,20 +32,24 @@ export function createMinimap(canvas, camera, { groundY }) {
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cw, ch);
-    ctx.fillStyle = darkness > 0.5 ? '#1b1b1f' : '#fff';
+    ctx.fillStyle = darkness > 0.5 ? '#141a30' : '#cfe6ff';
     ctx.fillRect(0, 0, cw, ch);
-    // ground
-    const gy = Y(groundY);
-    ctx.fillStyle = darkness > 0.5 ? '#2a2a30' : '#ececee';
-    ctx.fillRect(0, gy, cw, ch - gy);
-    ctx.fillStyle = darkness > 0.5 ? '#888' : '#111';
-    ctx.fillRect(0, gy, cw, 1);
+    // terrain profile
+    const prof = terrain.profile(x1, x2, 90);
+    ctx.fillStyle = darkness > 0.5 ? '#3a2e24' : '#8a6a4a';
+    ctx.beginPath();
+    prof.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))));
+    ctx.lineTo(cw, ch); ctx.lineTo(0, ch); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#4f9f35'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    prof.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))));
+    ctx.stroke();
     for (const it of items) {
       const s = sizes.get(it.id);
       if (!s) continue;
       const w = Math.max(2, s.w * it.s * k), h = Math.max(2, s.h * it.s * k);
       const x = X(it.x), y = Y(it.y);
-      if (it.type === 'sun' || it.type === 'lamp' || it.type === 'torch' || (it.type === 'fire' && it.d?.lit !== false)) {
+      if (it.type === 'lamp' || it.type === 'torch' || (it.type === 'fire' && it.d?.lit !== false)) {
         ctx.fillStyle = it.type === 'fire' ? '#ff6a1a' : '#ffc61a';
         ctx.beginPath(); ctx.arc(x, y, 3.2, 0, Math.PI * 2); ctx.fill();
         continue;

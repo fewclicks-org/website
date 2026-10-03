@@ -11,7 +11,8 @@ const rot = (x, y, a) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.si
 export function createElements({ physics, lights, camera, canvas, els, sizes, getItems, getLinks, api }) {
   const ctx = canvas.getContext('2d');
   const { Query } = physics.M;
-  const G = physics.groundY;
+  const T = physics.terrain;
+  const S = (x) => T.surfaceY(x);
   let W = 0, H = 0, dpr = 1;
   const resize = () => {
     dpr = Math.min(devicePixelRatio || 1, 2);
@@ -137,7 +138,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
 
   /** Raycast straight down from (x, y) to the first solid item (or the ground). */
   function castDown(x, y, skip = new Set()) {
-    let best = { y: G, rec: null };
+    let best = { y: S(x), rec: null };
     physics.map.forEach((rec) => {
       if (skip.has(rec.item.id) || rec.body.isSensor || rec.item.type === 'cloud') return;
       const b = rec.body.bounds;
@@ -271,7 +272,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     }
 
     // snow melts slowly in daylight
-    const sunUp = lights.darkness < 0.3 && items.some((i) => i.type === 'sun');
+    const sunUp = lights.darkness < 0.3;
     if (sunUp && Math.random() < 0.2) for (const it of items) if (it.d?.snow) { it.d.snow = Math.max(0, it.d.snow - 0.002); }
 
     // water: plants drink from pools
@@ -359,20 +360,21 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
             P.splice(i, 1); continue;
           }
           const hit = Query.point(solidBodies, { x: p.x, y: p.y })[0];
-          if (hit || p.y >= G) {
+          const gy = S(p.x);
+          if (hit || p.y >= gy) {
             const rec = hit && recByBody.get(hit);
             onHit(p, rec);
-            if (p.k === 'rain') splash(p.x, Math.min(p.y, G), 2);
+            if (p.k === 'rain') splash(p.x, Math.min(p.y, gy), 2);
             if (p.k === 'snow' && !rec) { /* snow melts on the ground */ }
             P.splice(i, 1); continue;
           }
-          if (p.life <= 0 || p.y > G + 10) { P.splice(i, 1); continue; }
+          if (p.life <= 0) { P.splice(i, 1); continue; }
         } else {
           p.vy += (p.g ?? 0.3) * t60;
           if (p.k === 'smoke') { p.vy = -1.2; p.r += 0.4 * t60; }
           if (p.k === 'wind') p.vy -= (p.g ?? 0.3) * t60;
           p.x += p.vx * t60; p.y += p.vy * t60;
-          if (p.y > G && p.k !== 'smoke') { p.y = G; p.vy *= -0.2; p.vx *= 0.7; }
+          if (p.k !== 'smoke') { const gy = S(p.x); if (p.y > gy) { p.y = gy; p.vy *= -0.2; p.vx *= 0.7; } }
           if (p.life <= 0) P.splice(i, 1);
         }
       }

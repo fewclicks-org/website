@@ -1,8 +1,8 @@
 // Local-only persistence. The whole board lives in this browser's localStorage.
 // Nothing is ever sent anywhere: no server, no analytics, no cookies.
 
-const KEY = 'fewclicks:board:v2';
-const OLD_KEYS = ['fewclicks:board:v1'];
+const KEY = 'fewclicks:board:v3';
+const OLD_KEYS = ['fewclicks:board:v2', 'fewclicks:board:v1'];
 const LIMIT = 4.5 * 1024 * 1024; // most browsers allow ~5 MB per origin
 
 export function loadBoard() {
@@ -23,12 +23,13 @@ export function loadBoard() {
 
 /** Bring older boards up to date (v1 had a fixed-size board; v2 is an infinite canvas). */
 export function migrate(b) {
-  if (b.version >= 2) return { links: [], world: { wind: 0 }, ...b };
+  if (b.version >= 3) return { links: [], world: { wind: 0 }, ...b };
+  if (b.version === 2) return { links: [], world: { wind: 0 }, ...b, version: 3, items: b.items.filter((i) => i.type !== 'sun') };
   for (const it of b.items) {
     if (it.type === 'card' && it.d && it.d.title == null) it.d.title = 'Say hello';
     if (it.type === 'note' && it.d?.tone && !it.d.paper) it.d.paper = it.d.tone === 'black' ? 'black' : 'classic';
   }
-  return { ...b, version: 2, links: [], world: { wind: 0 } };
+  return { ...b, version: 3, links: [], world: { wind: 0 }, items: b.items.filter((i) => i.type !== 'sun') };
 }
 
 /** Returns { ok, bytes, nearLimit }. */

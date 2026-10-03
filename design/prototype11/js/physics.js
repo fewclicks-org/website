@@ -5,9 +5,11 @@
 import { pinOffset } from './items.js';
 
 const GRAVITY = { on: 1, low: 0.25, off: 0 };
-const CIRCLES = new Set(['ball', 'sun', 'coin', 'clock']);
+const CIRCLES = new Set(['ball', 'coin', 'clock']);
 
-export function createPhysics({ groundY, reduced = false }) {
+export function createPhysics({ terrain, reduced = false }) {
+  const groundY = terrain.groundY;
+  const S = (x) => terrain.surfaceY(x);
   const M = window.Matter;
   const { Engine, Bodies, Body, Composite, Constraint, Sleeping, Events } = M;
   const engine = Engine.create({ enableSleeping: true });
@@ -16,10 +18,7 @@ export function createPhysics({ groundY, reduced = false }) {
   engine.velocityIterations = 6;
   const world = engine.world;
 
-  // one very wide static ground: the canvas is infinite sideways and upwards
-  const T = 2000;
-  const ground = Bodies.rectangle(0, groundY + T / 2, 4e6, T, { isStatic: true, label: 'ground', friction: 0.8 });
-  Composite.add(world, ground);
+  // the ground is the editable terrain (static segments per chunk, see world/terrain.js)
 
   const map = new Map(); // id -> { item, body, w, h, pinC, frozen, still }
   const links = new Map(); // id -> { link, cs: [constraints] }
@@ -72,7 +71,8 @@ export function createPhysics({ groundY, reduced = false }) {
   function add(item, w, h) {
     // nothing may start below the ground line
     const hh = (h * item.s) / 2;
-    if (item.y + hh > groundY) item.y = groundY - hh - (item.type === 'water' ? 0 : 1);
+    const sy = S(item.x);
+    if (item.y + hh > sy) item.y = sy - hh - (item.type === 'water' ? 0 : 1);
     const body = bodyFor(item, w, h);
     const rec = { item, body, w, h, pinC: null, still: 0, frozen: false };
     map.set(item.id, rec);
@@ -190,16 +190,16 @@ export function createPhysics({ groundY, reduced = false }) {
     if (drag.mode === 'lock') {
       const prev = { ...rec.body.position };
       const h = (rec.h * rec.item.s) / 2;
-      Body.setPosition(rec.body, { x: pt.x + drag.dx, y: Math.min(groundY - (rec.item.type === 'water' ? h : h * 0.5), pt.y + drag.dy) });
+      Body.setPosition(rec.body, { x: pt.x + drag.dx, y: Math.min(S(pt.x + drag.dx) - (rec.item.type === 'water' ? h : h * 0.5), pt.y + drag.dy) });
       Body.setVelocity(rec.body, { x: rec.body.position.x - prev.x, y: rec.body.position.y - prev.y });
     } else if (drag.mode === 'pin') {
       rec.pinC.pointA.x = pt.x + drag.dx;
-      rec.pinC.pointA.y = Math.min(groundY - 10, pt.y + drag.dy);
+      rec.pinC.pointA.y = Math.min(S(pt.x + drag.dx) - 10, pt.y + drag.dy);
       rec.item.pa = { x: rec.pinC.pointA.x, y: rec.pinC.pointA.y };
       Sleeping.set(rec.body, false);
     } else {
       drag.c.pointA.x = pt.x;
-      drag.c.pointA.y = Math.min(groundY, pt.y);
+      drag.c.pointA.y = Math.min(S(pt.x), pt.y);
     }
   }
   function dragEnd() {
@@ -299,7 +299,7 @@ export function createPhysics({ groundY, reduced = false }) {
   function settle(steps = 240) { for (let i = 0; i < steps; i++) step(16.667); }
 
   return {
-    M, engine, map, groundY, add, remove, clear, resize, setPin, nudge, setAngle, moveTo, dragStart, dragMove, dragEnd, setGravity, step, settle,
+    M, engine, map, groundY, terrain, add, remove, clear, resize, setPin, nudge, setAngle, moveTo, dragStart, dragMove, dragEnd, setGravity, step, settle,
     addLink, removeLink, links, push, setVelocity, setSolid, thaw: (id) => thaw(map.get(id)), onBeforeUpdate: (fn) => hooks.push(fn),
     get gravity() { return gravityMode; },
     get dragging() { return !!drag; },

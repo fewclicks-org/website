@@ -190,4 +190,6 @@ Object.assign(ICONS, {
   flip: I('<path d="M12 3v18"/><path d="M8 7l-5 5 5 5z"/><path d="M16 7l5 5-5 5z"/>'),
   world: I('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>'),
   paste: I('<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V2h6v2"/>'),
+  shovel: I('<path d="M14 4l6 6"/><path d="M17 7l-7 7"/><path d="M10 14l-1.5-1.5-4 4a2.1 2.1 0 0 0 3 3l4-4z"/>'),
+  palette: I('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-1.3-1-1.6-1-2.7 0-1 .8-1.5 1.8-1.5H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor"/><circle cx="10" cy="7" r="1.2" fill="currentColor"/><circle cx="15" cy="7" r="1.2" fill="currentColor"/>'),
 });

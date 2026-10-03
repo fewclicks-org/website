@@ -32,7 +32,7 @@ function wrap(ctx, text, maxW) {
 /**
  * @param items sorted by z; els Map(id->el); sizes Map(id->{w,h}); cam {x,y,z}; view {w,h}; lightCanvas
  */
-export async function snapshot({ items, els, sizes, cam, view, lightCanvas, fxCanvas, groundY, background = '#ffffff' }) {
+export async function snapshot({ items, els, sizes, cam, view, lightCanvas, fxCanvas, skyCanvas, backCanvas, ink = false, background = '#ffffff' }) {
   const dpr = 1.5;
   const c = document.createElement('canvas');
   c.width = Math.round(view.w * dpr);
@@ -41,17 +41,9 @@ export async function snapshot({ items, els, sizes, cam, view, lightCanvas, fxCa
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, c.width, c.height);
 
-  // dot grid like the board
-  ctx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, -cam.x * cam.z * dpr, -cam.y * cam.z * dpr);
-  ctx.fillStyle = 'rgba(0,0,0,.08)';
-  const g = 40, x0 = Math.floor(cam.x / g) * g, y0 = Math.floor(cam.y / g) * g;
-  for (let x = x0; x < cam.x + view.w / cam.z; x += g) for (let y = y0; y < cam.y + view.h / cam.z; y += g) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
-  if (groundY != null && groundY < cam.y + view.h / cam.z) {
-    ctx.fillStyle = '#f1f1f2';
-    ctx.fillRect(cam.x, groundY, view.w / cam.z, cam.y + view.h / cam.z - groundY);
-    ctx.fillStyle = '#111';
-    ctx.fillRect(cam.x, groundY - 2, view.w / cam.z, 4);
-  }
+  // sky + ground (already in screen space)
+  if (skyCanvas) ctx.drawImage(skyCanvas, 0, 0, c.width, c.height);
+  if (backCanvas) ctx.drawImage(backCanvas, 0, 0, c.width, c.height);
 
   // preload every image/svg used by visible items
   const jobs = [];
@@ -129,6 +121,12 @@ export async function snapshot({ items, els, sizes, cam, view, lightCanvas, fxCa
   ctx.textAlign = 'right';
   ctx.fillText('fewclicks.org', c.width - 14 * dpr, c.height - 14 * dpr);
 
+  if (ink) {
+    // Ink world: remove all color
+    const img = ctx.getImageData(0, 0, c.width, c.height), d = img.data;
+    for (let i = 0; i < d.length; i += 4) { const g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114; d[i] = d[i + 1] = d[i + 2] = g; }
+    ctx.putImageData(img, 0, 0);
+  }
   const png = await new Promise((r) => c.toBlob(r, 'image/png'));
   const k = Math.min(1, 900 / Math.max(c.width, c.height));
   const t = document.createElement('canvas');

@@ -19,7 +19,9 @@
   <h1 class="sr-only">FewClicks Studios interactive whiteboard</h1>
 
   <div class="viewport" data-viewport aria-label="Infinite whiteboard. Drag to pan, scroll or pinch to zoom, right-click or long-press for the menu." role="application">
-    <div class="ground" aria-hidden="true"></div>
+    <canvas class="sky" data-sky aria-hidden="true"></canvas>
+    <div class="dots" data-dots aria-hidden="true"></div>
+    <canvas class="wback" data-wback aria-hidden="true"></canvas>
     <div class="layer" data-layer></div>
     <canvas class="fx" data-fx aria-hidden="true"></canvas>
     <canvas class="lights" data-lights aria-hidden="true"></canvas>
@@ -37,6 +39,7 @@
       <button type="button" data-g="on">On</button><button type="button" data-g="low">Low</button><button type="button" data-g="off">Off</button>
     </div>
     <div class="group" role="group" aria-label="Board">
+      <button type="button" class="btn" data-ink-toggle title="Color world / Ink world (I)" aria-label="Ink world (remove all color)" aria-pressed="false"></button>
       <button type="button" class="btn" data-flash title="Flashlight cursor (F)" aria-label="Flashlight cursor" aria-pressed="false"></button>
       <button type="button" class="btn" data-snd aria-label="Sound"></button>
       <button type="button" class="btn" data-export title="Export board (JSON file)" aria-label="Export board"></button>
@@ -48,6 +51,8 @@
 
   <nav class="tools" id="tools" data-tools aria-label="Tools"></nav>
   <div class="penbar" data-penbar hidden role="toolbar" aria-label="Pen options"></div>
+  <div class="penbar shovelbar" data-shovelbar hidden role="toolbar" aria-label="Terrain tools"></div>
+  <section class="timebar" data-timebar aria-label="World time"></section>
   <div class="gallery" data-gallery hidden role="dialog" aria-label="Gallery"></div>
 
   <aside class="nav-box" aria-label="Minimap and zoom">

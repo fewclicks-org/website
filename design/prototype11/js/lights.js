@@ -1,7 +1,8 @@
 // Lighting: a screen-space darkness layer with holes cut by light sources, plus per-item directional shadows.
-// No sun on the board = night. Lamps (point lights), torches (cone spotlights) and a cursor flashlight light it up.
+// Darkness + light colour come from the world clock (sun altitude, moon). Lamps, torches, fires and the
+// cursor flashlight cut light into the night. Shadows follow the sun's angle: long at dawn/dusk, short at noon.
 
-export function createLights(canvas, { groundY }) {
+export function createLights(canvas) {
   const ctx = canvas.getContext('2d');
   let W = 0, H = 0, dpr = 1;
   const resize = () => {
@@ -16,20 +17,11 @@ export function createLights(canvas, { groundY }) {
   let flash = 0; // lightning flash 0..1, decays every frame
   const LAMP = { warm: '255,200,120', cool: '170,210,255', white: '255,255,240' };
 
-  /** Compute ambient darkness from the sun (higher sun = brighter day). */
-  function ambient(items) {
-    const sun = items.find((i) => i.type === 'sun');
-    if (!sun) return { dark: 0.9, sun: null };
-    const h = Math.min(1, Math.max(0, sun.y / groundY)); // 0 high in the sky .. 1 on the ground
-    const day = 1 - Math.pow(h, 1.6);
-    return { dark: Math.max(0, Math.min(0.78, 0.78 * (1 - day))), sun, warm: Math.max(0, h - 0.45) };
-  }
-
   /**
    * Draw the light overlay. cam = {x,y,z}; flashlight = {x,y} screen point or null.
    */
-  function draw(items, cam, flashlight) {
-    const amb = ambient(items);
+  function draw(items, cam, flashlight, env = { dark: 0, warm: 0 }) {
+    const amb = { dark: env.dark, warm: env.warm };
     darkness = amb.dark;
     flash *= 0.86;
     if (flash < 0.02) flash = 0;
@@ -37,9 +29,9 @@ export function createLights(canvas, { groundY }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     // sunset tint
-    if (amb.sun && amb.warm > 0) {
+    if (amb.warm > 0) {
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = `rgba(255,120,40,${amb.warm * 0.18})`;
+      ctx.fillStyle = `rgba(255,120,40,${amb.warm * 0.16})`;
       ctx.fillRect(0, 0, W, H);
     }
     if (darkness < 0.06) { darkness = 0; drawFlash(); return darkness; }
@@ -71,12 +63,6 @@ export function createLights(canvas, { groundY }) {
         g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.5, 'rgba(0,0,0,.8)'); g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
-      } else if (it.type === 'sun' && amb.sun) {
-        const p = S(it.x, it.y);
-        const r = 420 * cam.z;
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-        g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
       }
     }
     if (flashlight) {
@@ -112,17 +98,20 @@ export function createLights(canvas, { groundY }) {
    * Directional shadows: every item casts a drop-shadow away from the dominant light.
    * els: Map(id -> element)
    */
-  function shadows(items, els) {
-    const sun = items.find((i) => i.type === 'sun');
+  function shadows(items, els, sunInfo = null) {
+    const sun = sunInfo && sunInfo.alt > 0.02 ? sunInfo : null;
     const lamps = items.filter((i) => i.type === 'lamp' || i.type === 'torch' || (i.type === 'fire' && i.d?.lit !== false));
     for (const it of items) {
       const el = els.get(it.id);
       if (!el) continue;
       if (it.type === 'water' || it.type === 'cloud') { setShadow(el, it.type === 'cloud' ? 'drop-shadow(0 30px 24px rgba(0,0,0,.12))' : 'none'); continue; }
-      if (it.type === 'sun' || it.type === 'lamp') { setShadow(el, it.type === 'sun' ? 'drop-shadow(0 0 40px rgba(255,200,40,.9))' : 'drop-shadow(0 0 24px rgba(255,220,150,.9))'); continue; }
+      if (it.type === 'lamp') { setShadow(el, darkness > 0.3 ? 'drop-shadow(0 0 24px rgba(255,220,150,.9))' : 'drop-shadow(0 6px 6px rgba(0,0,0,.2))'); continue; }
       let lx, ly, strength;
-      if (sun) { lx = sun.x; ly = sun.y; strength = 1; }
-      else {
+      if (sun) {
+        // the sun is far away: a direction, not a point. Low sun = long shadows.
+        const len0 = Math.min(5, 1 / Math.tan(Math.max(0.05, sun.alt)));
+        lx = it.x - sun.dirX * 1000 * len0; ly = it.y - 1000; strength = Math.min(1.8, 0.5 + len0 * 0.35);
+      } else {
         let best = null, bd = Infinity;
         for (const l of lamps) { const d = Math.hypot(l.x - it.x, l.y - it.y); if (d < bd) { bd = d; best = l; } }
         if (!best || bd > 1800) { setShadow(el, 'none'); continue; }
@@ -131,13 +120,13 @@ export function createLights(canvas, { groundY }) {
       const dx = it.x - lx, dy = it.y - ly;
       const d = Math.hypot(dx, dy) || 1;
       const lift = it.pin === 'pin' ? 22 : it.pin === 'lock' ? 12 : 7;
-      const len = lift * strength * (sun ? 1 : 1.4) * Math.min(1.6, 0.6 + d / 1200);
+      const len = lift * strength * (sun ? 1.2 : 1.4) * (sun ? 1 : Math.min(1.6, 0.6 + d / 1200));
       // shadow offset must be expressed in the item's rotated space
       const ox = (dx / d) * len, oy = (dy / d) * len;
       const c = Math.cos(-it.a), s = Math.sin(-it.a);
       const rx = (ox * c - oy * s) / it.s, ry = (ox * s + oy * c) / it.s;
       const blur = (6 + len * 0.7) / it.s;
-      const alpha = sun ? 0.26 : 0.55 * strength;
+      const alpha = sun ? 0.3 * (1 - (sunInfo.cover || 0) * 0.8) : 0.55 * strength * Math.min(1, darkness * 1.5);
       setShadow(el, `drop-shadow(${rx.toFixed(1)}px ${ry.toFixed(1)}px ${blur.toFixed(1)}px rgba(0,0,0,${alpha.toFixed(2)}))`);
     }
   }

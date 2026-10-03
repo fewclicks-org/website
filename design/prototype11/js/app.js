@@ -23,6 +23,9 @@ import { createStroke, drawPreview, packStrokes, worldStrokes, hitStroke } from 
 import { snapshot, download } from './snapshot.js';
 import { loadBoard, saveBoard, clearBoard, createHistory, exportFile, importFile, compressImage } from './store.js';
 import { seedBoard, GROUND_Y, CENTER } from './seed.js';
+import { createTerrain } from './world/terrain.js';
+import { createWorld } from './world/world.js';
+import { SPEEDS } from './world/clock.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const viewport = $('[data-viewport]');
@@ -47,10 +50,14 @@ let pendingImageFor = null;
 const history = createHistory(60);
 const TEXTY = new Set(['text', 'title', 'note', 'bubble']);
 
-const physics = createPhysics({ groundY: GROUND_Y, reduced: reducedMotion });
-const camera = createCamera(viewport, layer, { groundY: GROUND_Y, onChange: () => { camDirty = true; } });
-const lights = createLights(lightCanvas, { groundY: GROUND_Y });
-const minimap = createMinimap($('[data-minimap]'), camera, { groundY: GROUND_Y });
+const terrain = createTerrain({ groundY: GROUND_Y });
+const physics = createPhysics({ terrain, reduced: reducedMotion });
+terrain.attach(physics);
+const camera = createCamera(viewport, layer, { groundY: GROUND_Y, dots: $('[data-dots]'), onChange: () => { camDirty = true; } });
+const lights = createLights(lightCanvas);
+const minimap = createMinimap($('[data-minimap]'), camera, { terrain });
+const world = createWorld({ skyCanvas: $('[data-sky]'), backCanvas: $('[data-wback]'), camera, terrain });
+const groundAt = (x, up = 0) => terrain.surfaceY(x) - up;
 const menu = createMenu();
 let camDirty = true;
 const byId = (id) => board?.items.find((i) => i.id === id);
@@ -81,7 +88,8 @@ async function init() {
   buildUI();
   try { DATA = await loadAll(); } catch (e) { toast('Could not load studio content'); console.error(e); }
   const saved = loadBoard();
-  board = normalize(saved || (DATA ? seedBoard(DATA) : { version: 2, gravity: 'on', items: [] }));
+  board = normalize(saved || (DATA ? seedBoard(DATA) : { version: 3, gravity: 'on', items: [] }));
+  world.load(board.world?.clock);
   await document.fonts?.ready;
   mountAll();
   physics.setGravity(board.gravity || 'on');
@@ -90,16 +98,18 @@ async function init() {
   else startView();
   if (!saved) {
     physics.settle(reducedMotion ? 400 : 30);
-    toast('Welcome! Right-click (or long-press) anything. Everything stays in your browser.', 4600);
+    toast('Welcome! Right-click (or long-press) anything. Try ⏩ in the time bar to watch days and seasons pass.', 5200);
   } else if (reducedMotion) physics.settle(200);
   history.push(serialize());
   syncHistoryUI();
+  paintTimebar(world.clock.get());
   requestAnimationFrame(loop);
   document.body.classList.add('ready');
 }
 function normalize(b) {
   b.links = b.links || [];
   b.world = b.world || { wind: 0 };
+  b.items = b.items.filter((i) => i.type !== 'sun'); // the sun lives in the sky now
   return b;
 }
 function startView() {
@@ -109,10 +119,11 @@ function startView() {
 
 function serialize() {
   return JSON.parse(JSON.stringify({
-    version: 2,
+    version: 3,
     gravity: physics.gravity,
     cam: camera.get(),
-    world: { wind: elements.world.wind },
+    world: { wind: elements.world.wind, clock: world.clock.state },
+    terrain: terrain.serialize(),
     links: board.links,
     items: board.items.map(({ v, ...it }) => ({ ...it, x: +it.x.toFixed(1), y: +it.y.toFixed(1), a: +it.a.toFixed(4) })),
   }, (k, v) => (k.startsWith('_') ? undefined : v)));
@@ -159,6 +170,8 @@ function unmountAll() {
 }
 function mountAll() {
   unmountAll();
+  terrain.load(board.terrain);
+  syncGround(true);
   elements.world.wind = board.world?.wind || 0;
   [...board.items].sort((a, b) => a.z - b.z).forEach(mountItem);
   board.links = (board.links || []).filter((l) => byId(l.a) && byId(l.b));
@@ -201,7 +214,19 @@ function rerender(item) {
   el.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => remeasure(item), { once: true }));
   if (selected === item.id) { el.classList.add('sel'); renderCtxBar(item); }
 }
-function viewCenter(dy = 0) { const v = camera.viewRect(); return { x: v.x + v.w / 2, y: Math.min(GROUND_Y - 120, v.y + v.h / 2 + dy * v.h) }; }
+function viewCenter(dy = 0) { const v = camera.viewRect(); const x = v.x + v.w / 2; return { x, y: Math.min(groundAt(x, 120), v.y + v.h / 2 + dy * v.h) }; }
+
+/** Physics for the terrain only exists near things that can move (and the view). */
+let groundSyncFrame = 0;
+function syncGround(force = false) {
+  if (!force && terrain.dirtyCount === 0 && ++groundSyncFrame % 20) return;
+  const need = new Set();
+  const v = camera.viewRect();
+  for (let k = terrain.chunkOf(v.x) - 1; k <= terrain.chunkOf(v.x + v.w) + 1; k++) need.add(k);
+  physics.map.forEach((r) => { if (!r.body.isStatic || r.frozen) { const k = terrain.chunkOf(r.body.position.x); need.add(k - 1); need.add(k); need.add(k + 1); } });
+  if (need.size > 400) return;
+  terrain.syncBodies(need);
+}
 
 // ---------------- render loop ----------------
 let last = performance.now(), frame = 0, dirtySince = 0;
@@ -211,6 +236,9 @@ function loop(now) {
   last = now;
   frame++;
   if (document.hidden) return;
+  world.tick(dt);
+  if (shovel.active) applyShovel(dt);
+  syncGround();
   const moved = physics.step(dt);
   const elChanged = elements.update(dt, now);
   if (moved || camDirty) {
@@ -222,9 +250,13 @@ function loop(now) {
   if ((moved || elChanged) && !dirtySince) dirtySince = now;
   if (dirtySince && now - dirtySince > 1500 && !physics.dragging) { dirtySince = 0; save(); }
   const cam = camera.get();
-  lights.draw(board.items, cam, flashlight ? cursor : null);
+  const env = world.env();
+  world.draw(cam);
+  lights.draw(board.items, cam, flashlight ? cursor : null, env);
   elements.draw(cam);
-  if (frame % 2 === 0) lights.shadows(board.items, els);
+  if (frame % 2 === 0) lights.shadows(board.items, els, env.sun);
+  if (frame % 15 === 0) paintTimebar(env.c);
+  if (tool === 'shovel') drawShovelRing();
   if (frame % 6 === 0 || camDirty) minimap.draw(board.items, sizes, lights.darkness);
   if (selected) positionCtxBar();
   viewport.classList.toggle('night', lights.darkness > 0.5);
@@ -241,7 +273,7 @@ let penSeen = false;
 let lp = null; // long-press timer
 let lastMenuAt = 0;
 const gestures = bindGestures(viewport, camera, {
-  shouldPan: (e) => !editing && (tool === 'hand' || e.button === 1 || spaceDown || palmTouch(e) || (!e.target.closest('.it') && tool === 'select')),
+  shouldPan: (e) => !editing && (tool === 'hand' || e.button === 1 || spaceDown || palmTouch(e) || (!e.target.closest('.it') && tool === 'select' && !nearSun(e))),
   onPinchStart: () => { physics.dragEnd(); downInfo = null; stroke = null; erasing = false; clearInk(); cancelLongPress(); },
 });
 let spaceDown = false;
@@ -264,6 +296,21 @@ viewport.addEventListener('pointerdown', (e) => {
   }
 
   if (linking) { finishLink(item); return; }
+
+  // shovel: sculpt the terrain (pressure-sensitive with a pen)
+  if (tool === 'shovel' && !palmTouch(e)) {
+    capture(e);
+    shovel.active = { x: pt.x, y: pt.y, p: e.pointerType === 'pen' && e.pressure > 0 ? e.pressure : 0.7, target: GROUND_Y - terrain.surfaceY(pt.x) };
+    return;
+  }
+  // drag the sun (or moon) across the sky to change the time of day
+  if (!item && tool === 'select' && nearSun(e)) {
+    capture(e);
+    sunDrag = true;
+    viewport.classList.add('scrubbing');
+    scrubTo(e.clientX);
+    return;
+  }
 
   // pen tool: draw, or erase (eraser tool / the pen's eraser end / barrel button)
   if (tool === 'pen' && !palmTouch(e)) {
@@ -297,6 +344,8 @@ viewport.addEventListener('pointermove', (e) => {
   cursor = { x: e.clientX - r.left, y: e.clientY - r.top };
   if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress();
   if (gestures.pinching) return;
+  if (sunDrag) { scrubTo(e.clientX); return; }
+  if (shovel.active) { const q = camera.toWorld(e.clientX, e.clientY); shovel.active.x = q.x; shovel.active.y = q.y; if (e.pointerType === 'pen' && e.pressure > 0) shovel.active.p = e.pressure; return; }
   if (erasing) { eraseAt(camera.toWorld(e.clientX, e.clientY)); return; }
   if (stroke) { const pred = stroke.move(e); drawInk(pred); return; }
   if (downInfo) physics.dragMove(camera.toWorld(e.clientX, e.clientY));
@@ -304,6 +353,8 @@ viewport.addEventListener('pointermove', (e) => {
 viewport.addEventListener('pointerleave', () => { if (!downInfo) cursor = null; });
 const endPointer = (e) => {
   cancelLongPress();
+  if (sunDrag) { sunDrag = false; viewport.classList.remove('scrubbing'); commit(); return; }
+  if (shovel.active) { shovel.active = null; commit(); return; }
   if (erasing) { erasing = false; if (eraseDirty) { eraseDirty = false; commit(); } return; }
   if (stroke) { finishStroke(); return; }
   if (!downInfo) return;
@@ -629,11 +680,11 @@ function openContextMenu(x, y, item, focus = false) {
 function canvasEntries() {
   const at = (type, d = {}, extra = {}, opts = {}) => () => {
     const p = menuPoint || viewCenter();
-    addItem(makeItem(type, p.x, type === 'water' ? GROUND_Y - (d.h || 200) / 2 : Math.min(GROUND_Y - 80, p.y), d, extra), opts);
+    addItem(makeItem(type, p.x, type === 'water' ? groundAt(p.x, (d.h || 200) / 2) : Math.min(groundAt(p.x, 80), p.y), d, extra), opts);
   };
   const g = physics.gravity;
   const w = elements.world.wind;
-  const sun = board.items.find((i) => i.type === 'sun');
+  const isDay = world.clock.get().isDay;
   return [
     { label: 'Add here', icon: ICONS.plus, sub: [
       { label: 'Text', icon: ICONS.text, run: at('text', { text: 'Your text', font: 'marker', size: 56 }, {}, { edit: true }) },
@@ -653,7 +704,8 @@ function canvasEntries() {
       '-', { header: 'Wind' },
       ...[[0, 'Calm'], [0.5, 'Breeze →'], [-0.5, 'Breeze ←'], [1.5, 'Gale →']].map(([v, l]) => ({ label: l, checked: w === v, run: () => { elements.world.wind = v; commit(); toast(v ? `Wind: ${l}` : 'The wind dropped.', 1400); } })),
       '-',
-      { label: sun ? 'Night (remove the sun)' : 'Day (add the sun)', run: () => toggleDay() },
+      { label: isDay ? 'Jump to night' : 'Jump to morning', run: () => toggleDay() },
+      { label: world.clock.state.mode === 'sim' ? 'Back to real time' : 'Simulate time', run: () => { world.clock.setMode(world.clock.state.mode === 'sim' ? 'real' : 'sim'); paintTimebar(world.clock.get()); commit(); } },
     ] },
     { label: 'Fit everything', icon: ICONS.fit, kbd: '0', run: fitAll },
     { label: 'Take a snapshot', icon: ICONS.camera, kbd: 'C', run: takeSnapshot },
@@ -661,9 +713,10 @@ function canvasEntries() {
   ];
 }
 function toggleDay() {
-  const sun = board.items.find((i) => i.type === 'sun');
-  if (sun) { removeItem(sun.id); toast('Good night 🌙 Lamps, torches and fires still glow.'); }
-  else { const c = viewCenter(-0.35); addItem(makeItem('sun', c.x, Math.max(-800, c.y), {}, { s: 1.4 })); toast('Good morning! ☀️'); }
+  const day = world.clock.get().isDay;
+  world.clock.setTimeOfDay(day ? 23 * 60 : 12 * 60);
+  toast(day ? 'Good night 🌙 Lamps, torches and fires still glow.' : 'Good morning! ☀️');
+  paintTimebar(world.clock.get());
   commit();
 }
 function setGravity(m) { physics.setGravity(m); syncGravityUI(); commit(); sfx.whoosh(); }
@@ -773,7 +826,7 @@ async function takeSnapshot() {
   setTimeout(() => document.body.classList.remove('flash'), 350);
   try {
     const items = [...board.items].sort((a, b) => a.z - b.z);
-    const shot = await snapshot({ items, els, sizes, cam, view: { w: r.width, h: r.height }, lightCanvas, fxCanvas, groundY: GROUND_Y, background: '#ffffff' });
+    const shot = await snapshot({ items, els, sizes, cam, view: { w: r.width, h: r.height }, lightCanvas, fxCanvas, skyCanvas: $('[data-sky]'), backCanvas: $('[data-wback]'), ink: document.body.classList.contains('ink') });
     download(shot.png, `fewclicks-board-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`);
     const c = viewCenter(-0.3);
     addItem(makeItem('photo', c.x, c.y, { src: shot.jpeg, caption: 'snapshot ✶', wide: true }, { pin: null, a: (Math.random() - 0.5) * 0.3, s: 0.8 }));
@@ -798,7 +851,6 @@ const GALLERY = {
     { name: '🌸 Flower', svg: plantSvg('flower'), type: 'plant', d: { species: 'flower', growth: 0.4 } },
     { name: '🌻 Sunflower', svg: plantSvg('sunflower'), type: 'plant', d: { species: 'sunflower', growth: 0.4 } },
     { name: '🌵 Cactus', svg: plantSvg('cactus'), type: 'plant', d: { species: 'cactus', growth: 0.5 } },
-    { name: '☀️ Sun', svg: OBJECTS.sun, type: 'sun', d: {}, x: { s: 1.4 } },
     { name: '💡 Lamp', svg: OBJECTS.lamp, type: 'lamp', d: { temp: 'warm' } },
     { name: '🔦 Torch', svg: OBJECTS.torch, type: 'torch', d: { beam: 0.42 }, x: { a: 0.3 } },
   ],
@@ -825,11 +877,10 @@ const GALLERY = {
   ],
 };
 function placeEntry(e, at) {
-  if (e.type === 'sun' && board.items.some((i) => i.type === 'sun')) { const s = board.items.find((i) => i.type === 'sun'); select(s.id); camera.centerOn(s.x, s.y); toast('There is only one sun. Drag it to change the time of day.'); return; }
   const p = at || viewCenter(e.type === 'cloud' ? -0.3 : -0.15);
   const d = JSON.parse(JSON.stringify(e.d || {}));
   if (e.type === 'spinner' && !d.labels && DATA) d.labels = DATA.games.map((g) => g.title.split(' ')[0]).slice(0, 6);
-  const y = e.type === 'water' ? GROUND_Y - (d.h || 200) / 2 : Math.min(GROUND_Y - 120, p.y);
+  const y = e.type === 'water' ? groundAt(p.x, (d.h || 200) / 2) : Math.min(groundAt(p.x, 120), p.y);
   addItem(makeItem(e.type, p.x + (at ? 0 : (Math.random() - 0.5) * 160), y, d, { ...(e.x || {}) }), { edit: !!e.edit, inspect: !!e.inspect });
   if (e.type === 'cloud' && d.mode === 'storm') toast('Storm clouds strike lightning every few seconds. Tap one to strike now.');
 }
@@ -872,6 +923,7 @@ function buildUI() {
     ['fire', ICONS.fire, 'Campfire'],
     ['water', ICONS.water, 'Water pool'],
     ['elements', ICONS.plant, 'More elements: snow, storm, fan, magnet, plants…'],
+    ['shovel', ICONS.shovel, 'Shovel: sculpt hills, dig, paint sand / clay / rock (B)'],
     '|',
     ['camera', ICONS.camera, 'Camera snapshot (C)'],
   ];
@@ -889,6 +941,11 @@ function buildUI() {
   onSoundChange(paintSnd);
   snd.addEventListener('click', toggleSound);
   buildPenBar();
+  buildShovelBar();
+  buildTimebar();
+  $('[data-ink-toggle]').innerHTML = ICONS.palette;
+  $('[data-ink-toggle]').addEventListener('click', () => { setInk(!document.body.classList.contains('ink')); sfx.click(); toast(document.body.classList.contains('ink') ? 'Ink world: all color removed.' : 'Color world.', 1400); });
+  try { setInk(localStorage.getItem('fewclicks:ink') === '1'); } catch { /* ignore */ }
   setTool('select');
   mountPrototypeBadge(11, 'Whiteboard');
 
@@ -897,7 +954,7 @@ function buildUI() {
     if (!b) return;
     sfx.click();
     const t = b.dataset.tool;
-    if (['select', 'hand', 'pen'].includes(t)) { setTool(t); return; }
+    if (['select', 'hand', 'pen', 'shovel'].includes(t)) { setTool(t); return; }
     const c = viewCenter();
     if (t === 'text') addItem(makeItem('text', c.x, c.y, { text: 'Your text', font: 'marker', size: 56 }), { edit: true });
     if (t === 'note') addItem(makeItem('note', c.x, c.y, { text: 'Write something…', paper: 'classic' }, { a: (Math.random() - 0.5) * 0.08 }), { edit: true });
@@ -917,12 +974,12 @@ function buildUI() {
     if (e.target.closest('[data-gclose]')) { g.hidden = true; return; }
     const stk = e.target.closest('[data-stk]');
     const at = galleryAt;
-    if (stk) { const c = at || viewCenter(-0.38); addItem(makeItem('sticker', c.x + (at ? 0 : (Math.random() - 0.5) * 300), Math.min(GROUND_Y - 100, c.y), { key: stk.dataset.stk }, { a: (Math.random() - 0.5) * 0.6 })); return; }
+    if (stk) { const c = at || viewCenter(-0.38); addItem(makeItem('sticker', c.x + (at ? 0 : (Math.random() - 0.5) * 300), Math.min(groundAt(c.x, 100), c.y), { key: stk.dataset.stk }, { a: (Math.random() - 0.5) * 0.6 })); return; }
     const en = e.target.closest('[data-entry]');
     if (en) { const [tabName, i] = en.dataset.entry.split(':'); placeEntry(GALLERY[tabName][+i], at); if (GALLERY[tabName][+i].edit || GALLERY[tabName][+i].inspect) g.hidden = true; return; }
     if (e.target.closest('[data-upload]')) { pendingImageFor = null; $('[data-file]').click(); return; }
     const re = e.target.closest('[data-reuse]');
-    if (re) { const src = g.querySelector('.g-body')._srcs[+re.dataset.reuse]; const c = at || viewCenter(-0.1); addItem(makeItem('photo', c.x, Math.min(GROUND_Y - 150, c.y), { src, caption: '' }, { a: (Math.random() - 0.5) * 0.1 })); }
+    if (re) { const src = g.querySelector('.g-body')._srcs[+re.dataset.reuse]; const c = at || viewCenter(-0.1); addItem(makeItem('photo', c.x, Math.min(groundAt(c.x, 150), c.y), { src, caption: '' }, { a: (Math.random() - 0.5) * 0.1 })); }
   });
   $('[data-file]').addEventListener('change', async (e) => {
     const f = e.target.files?.[0];
@@ -944,12 +1001,13 @@ function buildUI() {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
-    try { board = normalize(await importFile(f)); mountAll(); physics.setGravity(board.gravity || 'on'); syncGravityUI(); if (board.cam) camera.set(board.cam); commit(); toast('Board imported.'); } catch { toast('That file is not a FewClicks board.'); }
+    try { board = normalize(await importFile(f)); world.load(board.world?.clock); mountAll(); physics.setGravity(board.gravity || 'on'); syncGravityUI(); if (board.cam) camera.set(board.cam); commit(); toast('Board imported.'); } catch { toast('That file is not a FewClicks board.'); }
   });
   $('[data-reset]').addEventListener('click', () => {
     if (!confirm('Reset the board? Everything you added will be removed from this browser.')) return;
     clearBoard();
     board = normalize(seedBoard(DATA));
+    world.load(board.world?.clock);
     mountAll();
     physics.setGravity('on');
     syncGravityUI();
@@ -996,7 +1054,7 @@ async function addPhotoFile(f, replaceFor = null, at = null) {
       return;
     }
     const c = at || viewCenter(-0.1);
-    addItem(makeItem('photo', c.x, Math.min(GROUND_Y - 150, c.y), { src: img.src, caption: f.name.replace(/\.[^.]+$/, '').slice(0, 28), ratio: `${img.w} / ${img.h}` }, { a: (Math.random() - 0.5) * 0.1 }));
+    addItem(makeItem('photo', c.x, Math.min(groundAt(c.x, 150), c.y), { src: img.src, caption: f.name.replace(/\.[^.]+$/, '').slice(0, 28), ratio: `${img.w} / ${img.h}` }, { a: (Math.random() - 0.5) * 0.1 }));
     toast('Photo added. It stays in this browser only.');
   } catch { toast('Could not read that image.'); }
 }
@@ -1037,7 +1095,9 @@ function setTool(t) {
   document.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
   viewport.dataset.tool = t;
   $('[data-penbar]').hidden = t !== 'pen';
-  if (t === 'pen') select(null);
+  $('[data-shovelbar]').hidden = t !== 'shovel';
+  if (t !== 'shovel') { const c = ink.getContext('2d'); c.clearRect(0, 0, ink.width, ink.height); }
+  if (t === 'pen' || t === 'shovel') select(null);
 }
 function setFlash(on) {
   flashlight = on;
@@ -1072,6 +1132,105 @@ function toast(text, ms = 2600) {
   t.classList.add('show');
   clearTimeout(toastT);
   toastT = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+// ---------------- world: time bar, sun scrubbing, shovel, ink mode ----------------
+let sunDrag = false;
+const shovel = { mode: 'raise', size: 180, active: null };
+function nearSun(e) {
+  const s = world.sky.sun;
+  if (!s) return false;
+  const r = viewport.getBoundingClientRect();
+  return Math.hypot(e.clientX - r.left - s.x, e.clientY - r.top - s.y) < Math.max(34, s.r * 1.8);
+}
+function scrubTo(clientX) {
+  const r = viewport.getBoundingClientRect();
+  const c = world.clock.get();
+  const sx = Math.max(-1.3, Math.min(1.3, ((clientX - r.left) / r.width - 0.5) / 0.44));
+  const H = sx * c.H0;
+  world.clock.setTimeOfDay(((H / (2 * Math.PI)) + 0.5) * 1440);
+  paintTimebar(world.clock.get());
+}
+function applyShovel(dt) {
+  const a = shovel.active;
+  const k = Math.min(3, dt / 16.667) * (a.p ?? 0.7) * (shovel.mode === 'raise' || shovel.mode === 'lower' ? 0.55 : 1);
+  terrain.brush(shovel.mode, a.x, shovel.size, k, a.target);
+  physics.map.forEach((r) => { if (Math.abs(r.body.position.x - a.x) < shovel.size + 200) physics.thaw(r.item.id); });
+  if (frame % 6 === 0) sfx.tick();
+}
+function drawShovelRing() {
+  const c = ink.getContext('2d');
+  const r = viewport.getBoundingClientRect();
+  if (c.canvas.width !== Math.round(r.width)) { c.canvas.width = r.width; c.canvas.height = r.height; }
+  c.clearRect(0, 0, c.canvas.width, c.canvas.height);
+  if (!cursor) return;
+  const z = camera.get().z;
+  const w = camera.toWorld(cursor.x + r.left, cursor.y + r.top);
+  const sy = camera.toScreen(w.x, terrain.surfaceY(w.x)).y;
+  c.strokeStyle = 'rgba(17,17,17,.7)'; c.setLineDash([6, 6]); c.lineWidth = 2;
+  c.beginPath(); c.ellipse(cursor.x, sy, shovel.size * z, Math.max(10, shovel.size * z * 0.35), 0, 0, Math.PI * 2); c.stroke();
+  c.setLineDash([]);
+  c.beginPath(); c.moveTo(cursor.x, cursor.y); c.lineTo(cursor.x, sy); c.stroke();
+}
+function buildShovelBar() {
+  const bar = $('[data-shovelbar]');
+  const modes = [['raise', '⬆', 'Raise ground'], ['lower', '⬇', 'Dig / lower'], ['smooth', '≈', 'Smooth'], ['flatten', '▬', 'Flatten to start height'], ['|'], ['grass', '🌱', 'Grass'], ['dirt', '🟫', 'Bare dirt'], ['sand', '🏖', 'Sand (drains fast)'], ['clay', '🧱', 'Clay (holds water)'], ['rock', '🪨', 'Rock (can’t dig)']];
+  bar.innerHTML = `<div class="pb-g">${modes.map(([m, ic, l]) => (m === '|' ? '<i class="sep"></i>' : `<button type="button" data-sm="${m}" title="${l}" aria-label="${l}" class="emo">${ic}</button>`)).join('')}</div><i class="sep"></i><div class="pb-g">${[[90, 'S'], [180, 'M'], [360, 'L']].map(([s, l]) => `<button type="button" data-ss="${s}" aria-label="Brush ${l}" class="sz"><i style="--s:${s / 18}px"></i></button>`).join('')}</div>`;
+  const paint = () => {
+    bar.querySelectorAll('[data-sm]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.sm === shovel.mode)));
+    bar.querySelectorAll('[data-ss]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.ss === shovel.size)));
+  };
+  bar.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.sm) shovel.mode = b.dataset.sm; if (b.dataset.ss) shovel.size = +b.dataset.ss; sfx.tick(); paint(); });
+  bar.addEventListener('pointerdown', (e) => e.stopPropagation());
+  paint();
+}
+function buildTimebar() {
+  const tb = $('[data-timebar]');
+  tb.innerHTML = `<button type="button" class="tb-main" data-tb-open aria-expanded="false" title="World time"><span class="tb-ic" data-tb-ic aria-hidden="true"></span><b data-tb-time>--:--</b><span class="tb-meta" data-tb-meta></span></button>
+    <div class="tb-ctl"><button type="button" data-tb-mode title="Real time / Simulate"></button><button type="button" data-tb-play aria-label="Pause / play"></button><button type="button" data-tb-speed title="Speed"></button></div>
+    <div class="tb-panel" data-tb-panel hidden>
+      <label class="row"><span>Time of day</span><input type="range" min="0" max="1439" step="1" data-tb-scrub aria-label="Time of day"></label>
+      <div class="row"><span>Season</span><div class="seg2" data-tb-seasons>${['Spring', 'Summer', 'Autumn', 'Winter'].map((n, i) => `<button type="button" data-season="${i}" role="radio">${['🌸', '☀️', '🍂', '❄️'][i]} ${n}</button>`).join('')}</div></div>
+      <p class="tb-hint">Tip: drag the sun or moon across the sky. Real time follows your clock and today’s date.</p>
+    </div>`;
+  tb.addEventListener('pointerdown', (e) => e.stopPropagation());
+  tb.addEventListener('click', (e) => {
+    const c = world.clock;
+    if (e.target.closest('[data-tb-open]')) { const p = tb.querySelector('[data-tb-panel]'); p.hidden = !p.hidden; e.target.closest('[data-tb-open]').setAttribute('aria-expanded', String(!p.hidden)); }
+    if (e.target.closest('[data-tb-mode]')) { c.setMode(c.state.mode === 'sim' ? 'real' : 'sim'); toast(c.state.mode === 'sim' ? 'Simulating time. Use the speed button to fast-forward.' : 'Back to real time: your clock and today’s season.', 2600); }
+    if (e.target.closest('[data-tb-play]')) { if (c.state.mode !== 'sim') c.setMode('sim'); c.setPaused(!c.state.paused); }
+    if (e.target.closest('[data-tb-speed]')) { if (c.state.mode !== 'sim') c.setMode('sim'); const i = SPEEDS.indexOf(c.state.speed); c.setSpeed(SPEEDS[(i + 1) % SPEEDS.length]); c.setPaused(false); }
+    const se = e.target.closest('[data-season]');
+    if (se) { c.setSeason(+se.dataset.season); }
+    sfx.click();
+    paintTimebar(c.get());
+    commit();
+  });
+  tb.addEventListener('input', (e) => { if (e.target.matches('[data-tb-scrub]')) { world.clock.setTimeOfDay(+e.target.value); paintTimebar(world.clock.get()); } });
+  tb.addEventListener('change', (e) => { if (e.target.matches('[data-tb-scrub]')) commit(); });
+}
+function paintTimebar(c) {
+  const tb = $('[data-timebar]');
+  if (!tb.firstChild) return;
+  const st = world.clock.state;
+  const moonIc = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'][Math.round(c.phase * 8) % 8];
+  tb.querySelector('[data-tb-ic]').textContent = c.isDay ? (c.sunAltDeg < 8 ? '🌅' : '☀️') : moonIc;
+  tb.querySelector('[data-tb-time]').textContent = c.label;
+  const when = st.mode === 'sim' ? `Day ${c.day + 1}` : new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
+  tb.querySelector('[data-tb-meta]').textContent = `${when} · ${c.season} · ${Math.round(c.temp)}°C`;
+  tb.querySelector('[data-tb-mode]').textContent = st.mode === 'sim' ? 'SIM' : 'REAL';
+  tb.querySelector('[data-tb-mode]').setAttribute('aria-pressed', String(st.mode === 'sim'));
+  tb.querySelector('[data-tb-play]').innerHTML = st.mode === 'sim' && !st.paused ? '⏸' : '▶';
+  tb.querySelector('[data-tb-speed]').textContent = `${st.speed}×`;
+  tb.classList.toggle('real', st.mode !== 'sim');
+  const scrub = tb.querySelector('[data-tb-scrub]');
+  if (document.activeElement !== scrub) scrub.value = String(Math.round(c.minutes));
+  tb.querySelectorAll('[data-season]').forEach((b) => b.setAttribute('aria-checked', String(+b.dataset.season === c.seasonIdx)));
+}
+function setInk(on) {
+  document.body.classList.toggle('ink', on);
+  $('[data-ink-toggle]').setAttribute('aria-pressed', String(on));
+  try { localStorage.setItem('fewclicks:ink', on ? '1' : '0'); } catch { /* private mode */ }
 }
 
 // ---------------- keyboard ----------------
@@ -1110,6 +1269,8 @@ addEventListener('keydown', (e) => {
   const map = { v: 'select', h: 'hand', d: 'pen' };
   if (map[k]) { setTool(map[k]); return; }
   if (k === 'e') { setTool('pen'); penOpts.tool = 'eraser'; $('[data-penbar] [data-pt="eraser"]')?.click(); return; }
+  if (k === 'b') { setTool('shovel'); return; }
+  if (k === 'i') { $('[data-ink-toggle]').click(); return; }
   if (k === 't') $('[data-tool="text"]').click();
   if (k === 'n') $('[data-tool="note"]').click();
   if (k === 'k') $('[data-tool="card"]').click();
@@ -1125,6 +1286,6 @@ addEventListener('beforeunload', () => save(true));
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(true); });
 
 // test hook for local automated checks (only with ?debug in the URL; nothing leaves the browser)
-if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, get board() { return board; }, byId, select, commit };
+if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, world, terrain, get board() { return board; }, byId, select, commit };
 
 init();

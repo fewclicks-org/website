@@ -2,6 +2,7 @@
 
 import { makeItem } from './items.js';
 import { packStrokes, demoHi } from './pen.js';
+import { createTerrain } from './world/terrain.js';
 
 /** The infinite canvas has one ground line; everything else is open space. */
 export const GROUND_Y = 3500;
@@ -11,7 +12,6 @@ export function seedBoard({ games, studio, team, news }) {
   const items = [];
   const add = (type, x, y, d, extra = {}) => { const it = makeItem(type, x, y, d, extra); items.push(it); return it; };
 
-  add('sun', 3200, 330, {}, { s: 1.4 });
   add('title', CENTER.x, CENTER.y, { text: 'FewClicks Studios', font: 'bubbles', size: 150, sub: studio.tagline || 'Games you can love in a few clicks.' }, { pin: 'lock' });
 
   // games on an ellipse around the title
@@ -79,5 +79,14 @@ export function seedBoard({ games, studio, team, news }) {
   add('doodle', hi.x, hi.y, { strokes: hi.strokes, w: hi.w, h: hi.h });
 
   items.forEach((it, i) => (it.z = i));
-  return { version: 2, gravity: 'on', cam: null, world: { wind: 0 }, links: [], items };
+  // rolling hills to the west, a sandy fire pit, a big hill far east with a rock outcrop
+  const t = createTerrain({ groundY: GROUND_Y });
+  t.hill(-5200, -900, 820);
+  t.hill(-3000, -1700, 360);
+  t.hill(9100, 12600, 1100);
+  t.hill(10300, 11200, 240);
+  t.paint('sand', -760, 560);
+  t.paint('rock', 10400, 11000);
+  t.paint('dirt', 6200, 6700);
+  return { version: 3, gravity: 'on', cam: null, world: { wind: 0, clock: { mode: 'real' } }, terrain: t.serialize(), links: [], items };
 }
