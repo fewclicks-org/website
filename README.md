@@ -50,6 +50,6 @@ python3 -m http.server 8000
 
    Remove any other A/AAAA/CNAME records for `@` and `www` (for example, the registrar's parking page).
 3. Wait for DNS to update. This is usually minutes, but can take up to 24 hours. Then tick **Enforce HTTPS** in Settings → Pages.
-4. Recommended: verify the domain in **Organization settings → Pages → Add a domain**. This adds a TXT record and stops anyone else from claiming `fewclicks.org` on GitHub Pages.
+4. Recommended: verify the domain in your **account Settings → Pages → Add a domain** (fewclicks-org is a personal account). This adds a TXT record and stops anyone else from claiming `fewclicks.org` on GitHub Pages.
 
 The prototypes are marked `noindex`, so search engines won't list them while we decide.

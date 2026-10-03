@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#141414">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='8' y='8' width='84' height='84' rx='18' fill='%23ffc93c' stroke='%23141414' stroke-width='8'/><text x='50' y='72' font-size='60' text-anchor='middle' font-family='Arial Black'>F</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=DM+Sans:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <title>FewClicks: grab it, throw it, play it</title>
+  <meta name="description" content="FewClicks is an independent game studio making bright, bite-size games for phones, PCs and consoles.">
+</head>
+<body data-page="home">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header data-chrome="header"></header>
+  <main id="main">
+    <section class="playground hero" data-hero aria-label="Physics playground: grab and throw the letters">
+      <div class="hero-copy">
+        <h1>FewClicks game studio</h1>
+        <p data-tagline>Games you can love in a few clicks.</p>
+        <div class="cta"><a class="btn btn--red" href="games.html">▶ Play our games</a><a class="btn" href="#studio">Meet the team</a></div>
+        <div class="hero-tools">
+          <button class="btn btn--sm btn--sun" type="button" data-zerog aria-pressed="false">🚀 Zero-G</button>
+          <button class="btn btn--sm btn--mint" type="button" data-shake>🌀 Shake</button>
+          <button class="btn btn--sm" type="button" data-tidy>🧹 Tidy up</button>
+          <button class="btn btn--sm btn--blue" type="button" data-tilt hidden>📱 Tilt mode</button>
+        </div>
+      </div>
+      <span class="hero-hint" aria-hidden="true">✋ Grab &amp; throw!</span>
+      <div data-letters></div>
+    </section>
+
+    <div class="marquee" aria-hidden="true"><div class="marquee-track" data-marquee></div></div>
+
+    <section class="section" id="games" aria-labelledby="games-title">
+      <div class="wrap">
+        <div class="head"><div><span class="kicker">Toy box</span><h2 class="title" id="games-title">Our <span class="hl">games</span></h2><p class="lead">Go on, pick them up and toss them around. Click one to open it.</p></div><a class="btn btn--sun" href="games.html" data-all>All games →</a></div>
+        <div class="playground toybox" data-featured><span class="toybox-label" aria-hidden="true">TOYS</span></div>
+      </div>
+    </section>
+
+    <section class="section" id="studio" aria-labelledby="studio-title">
+      <div class="wrap">
+        <div class="head"><div><span class="kicker">The studio</span><h2 class="title" id="studio-title">Few clicks, <span class="hl">big fun</span></h2><p class="lead" data-desc></p></div></div>
+        <div class="values" data-values></div>
+        <div class="stats" data-stats></div>
+        <div class="head" style="margin-top:80px"><div><span class="kicker">Players</span><h2 class="title">The <span class="hl">team</span></h2></div></div>
+        <div class="team" data-team></div>
+      </div>
+    </section>
+
+    <section class="section" id="news" aria-labelledby="news-title">
+      <div class="wrap">
+        <div class="head"><div><span class="kicker">Devlog</span><h2 class="title" id="news-title">Hot <span class="hl">news</span></h2></div></div>
+        <div class="news" data-news></div>
+      </div>
+    </section>
+
+    <section class="section" id="contact" aria-labelledby="contact-title">
+      <div class="wrap">
+        <div class="contact-card" data-contact data-reveal>
+          <h2 id="contact-title">Say hello!</h2>
+          <p style="font-weight:700;font-size:19px;margin-top:12px">Press, partners, players: our inbox is open.</p>
+          <a class="email" data-email-link="text" href="mailto:admin@fewclicks.org">admin@fewclicks.org</a>
+          <div class="row"><a class="btn btn--sun" data-email-link href="mailto:admin@fewclicks.org">✉ Email us</a><button class="btn" type="button" data-copy-email>📋 Copy</button></div>
+          <address data-address hidden></address>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer data-chrome="footer"></footer>
+  <dialog class="modal" id="news-modal" aria-labelledby="nm-title"><button class="modal-x" type="button" data-close aria-label="Close">✕</button><div class="modal-body" data-modal-body></div></dialog>
+  <script defer src="../vendor/matter.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
