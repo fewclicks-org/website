@@ -1,18 +1,34 @@
 // Local-only persistence. The whole board lives in this browser's localStorage.
 // Nothing is ever sent anywhere: no server, no analytics, no cookies.
 
-const KEY = 'fewclicks:board:v1';
+const KEY = 'fewclicks:board:v2';
+const OLD_KEYS = ['fewclicks:board:v1'];
 const LIMIT = 4.5 * 1024 * 1024; // most browsers allow ~5 MB per origin
 
 export function loadBoard() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
-    const b = JSON.parse(raw);
-    return b && Array.isArray(b.items) ? b : null;
+    if (raw) { const b = JSON.parse(raw); return b && Array.isArray(b.items) ? migrate(b) : null; }
+    for (const k of OLD_KEYS) {
+      const old = localStorage.getItem(k);
+      if (!old) continue;
+      const b = JSON.parse(old);
+      if (b && Array.isArray(b.items)) return migrate(b);
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+/** Bring older boards up to date (v1 had a fixed-size board; v2 is an infinite canvas). */
+export function migrate(b) {
+  if (b.version >= 2) return { links: [], world: { wind: 0 }, ...b };
+  for (const it of b.items) {
+    if (it.type === 'card' && it.d && it.d.title == null) it.d.title = 'Say hello';
+    if (it.type === 'note' && it.d?.tone && !it.d.paper) it.d.paper = it.d.tone === 'black' ? 'black' : 'classic';
+  }
+  return { ...b, version: 2, links: [], world: { wind: 0 } };
 }
 
 /** Returns { ok, bytes, nearLimit }. */
@@ -88,7 +104,7 @@ export function importFile(file) {
       try {
         const b = JSON.parse(r.result);
         if (!b || !Array.isArray(b.items)) throw new Error('Not a FewClicks board file');
-        resolve(b);
+        resolve(migrate(b));
       } catch (e) { reject(e); }
     };
     r.onerror = () => reject(r.error);

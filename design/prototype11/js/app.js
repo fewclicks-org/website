@@ -1,25 +1,34 @@
-// FewClicks Whiteboard: a black & white physics board with colored photos and stickers,
-// lights & shadows, pan/zoom + minimap. Everything is stored in this browser only (localStorage).
+// FewClicks Whiteboard v2: an infinite black & white canvas with colored photos and stickers,
+// physics, lights & shadows, weather and elements, pen/tablet writing, an app context menu and an
+// inspector that edits everything. Everything is stored in this browser only (localStorage).
 
 import { loadAll, starString, storeLabel, STATUS, PLATFORMS, escapeHtml as esc } from '../../shared/js/data.js';
 import { sfx, soundOn, toggleSound, onSoundChange } from '../../shared/js/sfx.js';
 import { reducedMotion, coarsePointer } from '../../shared/js/motion.js';
 import { mountPrototypeBadge } from '../../shared/js/proto-badge.js';
 import { gameFacts } from '../../shared/js/kit.js';
-import { STICKERS, ICONS, FONTS } from './art.js';
-import { makeItem, renderItem, place, syncState } from './items.js';
+import {
+  STICKERS, STICKER_GROUPS, OBJECTS, ICONS, FONTS, cloudSvg, fireSvg, fanSvg, magnetSvg, plantSvg, diceSvg, clockSvg,
+  duckSvg, clipSvg, iceSvg, coinSvg, spinnerSvg, extinguisherSvg,
+} from './art.js';
+import { makeItem, renderItem, place, syncState, patch, label } from './items.js';
 import { createPhysics } from './physics.js';
 import { createCamera, bindGestures } from './board.js';
 import { createLights } from './lights.js';
 import { createMinimap } from './minimap.js';
+import { createElements } from './elements.js';
+import { createMenu } from './menu.js';
+import { createInspector, PATCH_KEYS } from './editor.js';
+import { createStroke, drawPreview, packStrokes, worldStrokes, hitStroke } from './pen.js';
 import { snapshot, download } from './snapshot.js';
 import { loadBoard, saveBoard, clearBoard, createHistory, exportFile, importFile, compressImage } from './store.js';
-import { seedBoard, BOARD_W, BOARD_H, CENTER } from './seed.js';
+import { seedBoard, GROUND_Y, CENTER } from './seed.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const viewport = $('[data-viewport]');
 const layer = $('[data-layer]');
 const lightCanvas = $('[data-lights]');
+const fxCanvas = $('[data-fx]');
 const ink = $('[data-ink]');
 
 let DATA = null;
@@ -31,47 +40,82 @@ let tool = 'select';
 let flashlight = false;
 let cursor = null;
 let editing = null;
+let linking = null; // { from, kind } while choosing the second item of a link
+let clip = null; // internal clipboard (an item copy)
+let menuPoint = null; // world point where the canvas menu was opened
+let pendingImageFor = null;
 const history = createHistory(60);
+const TEXTY = new Set(['text', 'title', 'note', 'bubble']);
 
-const physics = createPhysics({ width: BOARD_W, height: BOARD_H, reduced: reducedMotion });
-const camera = createCamera(viewport, layer, { width: BOARD_W, height: BOARD_H, onChange: () => { camDirty = true; } });
-const lights = createLights(lightCanvas, { height: BOARD_H });
-const minimap = createMinimap($('[data-minimap]'), camera, { width: BOARD_W, height: BOARD_H });
+const physics = createPhysics({ groundY: GROUND_Y, reduced: reducedMotion });
+const camera = createCamera(viewport, layer, { groundY: GROUND_Y, onChange: () => { camDirty = true; } });
+const lights = createLights(lightCanvas, { groundY: GROUND_Y });
+const minimap = createMinimap($('[data-minimap]'), camera, { groundY: GROUND_Y });
+const menu = createMenu();
 let camDirty = true;
+const byId = (id) => board?.items.find((i) => i.id === id);
 
-layer.style.width = `${BOARD_W}px`;
-layer.style.height = `${BOARD_H}px`;
+const elements = createElements({
+  physics, lights, camera, canvas: fxCanvas, els, sizes,
+  getItems: () => board?.items || [],
+  getLinks: () => board?.links || [],
+  api: {
+    patch: (it) => { const el = els.get(it.id); if (el) patch(el, it); },
+    syncState: (it) => { const el = els.get(it.id); if (el) syncState(el, it); },
+    remove: (it) => { removeItem(it.id); commit(); },
+    commit: () => commit(),
+    toast: (m) => toast(m, 3200),
+    sfx,
+  },
+});
 
-// ---------------- boot ----------------
-init();
+const inspector = createInspector({
+  onChange: inspectorChange,
+  onAction: inspectorAction,
+  onClose: () => { if (inspectorDirty) { inspectorDirty = false; commit(); } },
+});
+let inspectorDirty = false;
+
+// ---------------- boot (init() runs at the end of this module) ----------------
 async function init() {
   buildUI();
   try { DATA = await loadAll(); } catch (e) { toast('Could not load studio content'); console.error(e); }
   const saved = loadBoard();
-  board = saved || (DATA ? seedBoard(DATA) : { version: 1, gravity: 'on', items: [] });
+  board = normalize(saved || (DATA ? seedBoard(DATA) : { version: 2, gravity: 'on', items: [] }));
   await document.fonts?.ready;
   mountAll();
   physics.setGravity(board.gravity || 'on');
   syncGravityUI();
   if (board.cam) camera.set(board.cam);
-  else if (innerWidth < 760) camera.fit({ x: CENTER.x - 900, y: CENTER.y - 1000, w: 1800, h: 2000 }, 10);
-  else camera.fit({ x: 1300, y: 250, w: 3800, h: 2500 }, coarsePointer ? 10 : 40);
+  else startView();
   if (!saved) {
     physics.settle(reducedMotion ? 400 : 30);
-    toast('Welcome! Everything you do here stays in your browser.', 4200);
+    toast('Welcome! Right-click (or long-press) anything. Everything stays in your browser.', 4600);
   } else if (reducedMotion) physics.settle(200);
   history.push(serialize());
+  syncHistoryUI();
   requestAnimationFrame(loop);
   document.body.classList.add('ready');
 }
+function normalize(b) {
+  b.links = b.links || [];
+  b.world = b.world || { wind: 0 };
+  return b;
+}
+function startView() {
+  if (innerWidth < 760) camera.fit({ x: CENTER.x - 900, y: CENTER.y - 1000, w: 1800, h: 2000 }, 10);
+  else camera.fit({ x: 1300, y: 250, w: 3800, h: 2500 }, coarsePointer ? 10 : 40);
+}
 
 function serialize() {
-  return {
-    version: 1,
+  return JSON.parse(JSON.stringify({
+    version: 2,
     gravity: physics.gravity,
     cam: camera.get(),
+    world: { wind: elements.world.wind },
+    links: board.links,
     items: board.items.map(({ v, ...it }) => ({ ...it, x: +it.x.toFixed(1), y: +it.y.toFixed(1), a: +it.a.toFixed(4) })),
-  };
+  }, (k, v) => (k.startsWith('_') ? undefined : v)));
 }
 let saveT = 0, lastBytesWarn = 0;
 function save(now = false) {
@@ -115,10 +159,13 @@ function unmountAll() {
 }
 function mountAll() {
   unmountAll();
+  elements.world.wind = board.world?.wind || 0;
   [...board.items].sort((a, b) => a.z - b.z).forEach(mountItem);
+  board.links = (board.links || []).filter((l) => byId(l.a) && byId(l.b));
+  board.links.forEach((l) => physics.addLink(l));
   select(null);
 }
-function addItem(item, { edit = false, quiet = false } = {}) {
+function addItem(item, { edit = false, quiet = false, inspect = false } = {}) {
   item.z = Math.max(0, ...board.items.map((i) => i.z)) + 1;
   board.items.push(item);
   mountItem(item);
@@ -126,18 +173,35 @@ function addItem(item, { edit = false, quiet = false } = {}) {
   if (!quiet) sfx.pop(1.1);
   commit();
   if (edit) startEdit(item);
+  if (inspect) openInspector(item);
   return item;
 }
 function removeItem(id) {
   board.items = board.items.filter((i) => i.id !== id);
+  board.links = board.links.filter((l) => { if (l.a === id || l.b === id) { physics.removeLink(l.id); return false; } return true; });
   physics.remove(id);
   els.get(id)?.remove();
   els.delete(id);
   sizes.delete(id);
   if (selected === id) select(null);
+  if (inspector.item?.id === id) inspector.close();
 }
-const byId = (id) => board.items.find((i) => i.id === id);
-function viewCenter(dy = 0) { const v = camera.viewRect(); return { x: v.x + v.w / 2, y: v.y + v.h / 2 + dy * v.h }; }
+function rerender(item) {
+  const old = els.get(item.id);
+  if (!old) return;
+  const el = renderItem(item);
+  old.replaceWith(el);
+  els.set(item.id, el);
+  const w = el.offsetWidth, h = el.offsetHeight;
+  sizes.set(item.id, { w, h });
+  delete item.pa;
+  physics.resize(item.id, w, h);
+  place(el, item, w, h);
+  syncState(el, item);
+  el.querySelectorAll('img').forEach((img) => img.addEventListener('load', () => remeasure(item), { once: true }));
+  if (selected === item.id) { el.classList.add('sel'); renderCtxBar(item); }
+}
+function viewCenter(dy = 0) { const v = camera.viewRect(); return { x: v.x + v.w / 2, y: Math.min(GROUND_Y - 120, v.y + v.h / 2 + dy * v.h) }; }
 
 // ---------------- render loop ----------------
 let last = performance.now(), frame = 0, dirtySince = 0;
@@ -146,46 +210,71 @@ function loop(now) {
   const dt = Math.min(now - last, 50);
   last = now;
   frame++;
-  const moved = document.hidden ? false : physics.step(dt);
+  if (document.hidden) return;
+  const moved = physics.step(dt);
+  const elChanged = elements.update(dt, now);
   if (moved || camDirty) {
     for (const it of board.items) {
       const el = els.get(it.id), s = sizes.get(it.id);
       if (el && s) place(el, it, s.w, s.h);
     }
   }
-  if (moved && !dirtySince) dirtySince = now;
-  if (dirtySince && now - dirtySince > 1200 && !physics.dragging) { dirtySince = 0; save(); }
-  lights.draw(board.items, camera.get(), flashlight ? cursor : null);
+  if ((moved || elChanged) && !dirtySince) dirtySince = now;
+  if (dirtySince && now - dirtySince > 1500 && !physics.dragging) { dirtySince = 0; save(); }
+  const cam = camera.get();
+  lights.draw(board.items, cam, flashlight ? cursor : null);
+  elements.draw(cam);
   if (frame % 2 === 0) lights.shadows(board.items, els);
-  if (frame % 5 === 0 || camDirty) minimap.draw(board.items, sizes, lights.darkness);
+  if (frame % 6 === 0 || camDirty) minimap.draw(board.items, sizes, lights.darkness);
   if (selected) positionCtxBar();
   viewport.classList.toggle('night', lights.darkness > 0.5);
-  if (camDirty) { $('[data-zoom]').textContent = `${Math.round(camera.get().z * 100)}%`; camDirty = false; if (!physics.dragging) save(); }
+  if (camDirty) { $('[data-zoom]').textContent = `${Math.round(cam.z * 100)}%`; camDirty = false; if (!physics.dragging) save(); }
 }
 
-// ---------------- pointer: select, drag, toss, draw ----------------
+// ---------------- pointer: select, drag, toss, draw, erase, link, long-press ----------------
 let downInfo = null;
 let stroke = null;
+let erasing = false;
+let lastTap = { id: null, t: 0 };
+let clickT = 0;
+let penSeen = false;
+let lp = null; // long-press timer
+let lastMenuAt = 0;
 const gestures = bindGestures(viewport, camera, {
-  shouldPan: (e) => !editing && (tool === 'hand' || e.button === 1 || spaceDown || (!e.target.closest('.it') && tool === 'select')),
-  onPinchStart: () => { physics.dragEnd(); downInfo = null; stroke = null; },
+  shouldPan: (e) => !editing && (tool === 'hand' || e.button === 1 || spaceDown || palmTouch(e) || (!e.target.closest('.it') && tool === 'select')),
+  onPinchStart: () => { physics.dragEnd(); downInfo = null; stroke = null; erasing = false; clearInk(); cancelLongPress(); },
 });
 let spaceDown = false;
+const palmTouch = (e) => e.pointerType === 'touch' && penSeen && tool === 'pen';
 
 viewport.addEventListener('pointerdown', (e) => {
-  if (e.button > 0 || editing && e.target.closest('[contenteditable]')) return;
+  if (e.pointerType === 'pen') penSeen = true;
+  if (e.button === 2) return; // right button: the context menu handles it
+  if (e.button > 0 || (editing && e.target.closest('[contenteditable]'))) return;
   if (editing) stopEdit();
+  if (inspector.isOpen && !e.target.closest('.it')) inspector.close();
   const pt = camera.toWorld(e.clientX, e.clientY);
-  if (tool === 'pen') {
-    viewport.setPointerCapture(e.pointerId);
-    stroke = { pts: [pt], el: null };
+  const el = e.target.closest('.it');
+  const item = el && byId(el.dataset.id);
+
+  // long-press (touch) opens the context menu
+  if (e.pointerType === 'touch') {
+    cancelLongPress();
+    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; physics.dragEnd(); if (downInfo) els.get(downInfo.id)?.classList.remove('grabbed'); downInfo = null; stroke = null; clearInk(); gestures.cancel(); openContextMenu(e.clientX, e.clientY, item); }, 550) };
+  }
+
+  if (linking) { finishLink(item); return; }
+
+  // pen tool: draw, or erase (eraser tool / the pen's eraser end / barrel button)
+  if (tool === 'pen' && !palmTouch(e)) {
+    capture(e);
+    erasing = penOpts.tool === 'eraser' || (e.buttons & 32) === 32 || e.button === 5;
+    if (erasing) { eraseAt(pt); return; }
+    stroke = createStroke(e, camera.toWorld, { ...penOpts });
     return;
   }
-  if (tool === 'hand' || spaceDown) return;
-  const el = e.target.closest('.it');
-  if (!el) { select(null); return; }
-  const item = byId(el.dataset.id);
-  if (!item) return;
+  if (tool === 'hand' || spaceDown || palmTouch(e)) return;
+  if (!item) { select(null); return; }
   // tap the pushpin to drop the item
   if (e.target.closest('.pushpin') && item.pin === 'pin') {
     physics.setPin(item.id, null);
@@ -199,19 +288,23 @@ viewport.addEventListener('pointerdown', (e) => {
   select(item.id);
   downInfo = { id: item.id, x: e.clientX, y: e.clientY, t: performance.now(), act: e.target.closest('[data-act]')?.dataset.act };
   physics.dragStart(item.id, pt);
-  viewport.setPointerCapture(e.pointerId);
+  capture(e);
   el.classList.add('grabbed');
   sfx.tick();
 });
 viewport.addEventListener('pointermove', (e) => {
-  cursor = { x: e.clientX - viewport.getBoundingClientRect().left, y: e.clientY - viewport.getBoundingClientRect().top };
+  const r = viewport.getBoundingClientRect();
+  cursor = { x: e.clientX - r.left, y: e.clientY - r.top };
+  if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancelLongPress();
   if (gestures.pinching) return;
-  const pt = camera.toWorld(e.clientX, e.clientY);
-  if (stroke) { stroke.pts.push(pt); drawInk(); return; }
-  if (downInfo) physics.dragMove(pt);
+  if (erasing) { eraseAt(camera.toWorld(e.clientX, e.clientY)); return; }
+  if (stroke) { const pred = stroke.move(e); drawInk(pred); return; }
+  if (downInfo) physics.dragMove(camera.toWorld(e.clientX, e.clientY));
 });
 viewport.addEventListener('pointerleave', () => { if (!downInfo) cursor = null; });
 const endPointer = (e) => {
+  cancelLongPress();
+  if (erasing) { erasing = false; if (eraseDirty) { eraseDirty = false; commit(); } return; }
   if (stroke) { finishStroke(); return; }
   if (!downInfo) return;
   const id = physics.dragEnd();
@@ -219,59 +312,262 @@ const endPointer = (e) => {
   const click = Math.hypot(e.clientX - downInfo.x, e.clientY - downInfo.y) < 6 && performance.now() - downInfo.t < 450;
   const info = downInfo;
   downInfo = null;
-  if (click) onItemClick(byId(info.id), info.act, e);
+  if (click) onTap(byId(info.id), info.act);
   else if (id) commit();
 };
 viewport.addEventListener('pointerup', endPointer);
 viewport.addEventListener('pointercancel', endPointer);
-viewport.addEventListener('dblclick', (e) => {
+function capture(e) { try { viewport.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ } }
+function cancelLongPress() { if (lp) { clearTimeout(lp.t); lp = null; } }
+
+// right-click / long-press: the app's own context menu (never the browser's)
+document.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('[contenteditable="true"], input, textarea')) return;
+  e.preventDefault();
+});
+viewport.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('[contenteditable="true"]')) return;
+  e.preventDefault();
+  if (performance.now() - lastMenuAt < 600) return;
   const el = e.target.closest('.it');
-  if (el) { const it = byId(el.dataset.id); if (it && (it.type === 'text' || it.type === 'note' || it.type === 'title')) startEdit(it); return; }
-  if (tool === 'select') { const p = camera.toWorld(e.clientX, e.clientY); addItem(makeItem('text', p.x, p.y, { text: 'Your text', font: 'marker', size: 56 }), { edit: true }); }
+  openContextMenu(e.clientX, e.clientY, el && byId(el.dataset.id));
 });
 
-function onItemClick(item, act, e) {
+// one tap = the item's action (delayed a moment), two taps = edit it. Empty space never creates anything.
+function onTap(item, act) {
   if (!item) return;
-  if (act === 'copy') { navigator.clipboard?.writeText(item.d.email).then(() => toast('Email copied!'), () => toast(item.d.email)); sfx.success(); return; }
-  if (act === 'mail') { location.href = `mailto:${item.d.email}`; return; }
-  if (item.type === 'game') openGame(item.d.gameId);
-  else if (item.type === 'camera') takeSnapshot();
-  else if (item.type === 'ball') { physics.nudge(item.id, (Math.random() - 0.5) * 30, -26, 0.3); sfx.boing(); }
-  else if (item.type === 'sun') toast('Drag the sun up for noon, down for sunset. Delete it for night.');
+  if (act) { cardAction(item, act); return; }
+  const now = performance.now();
+  if (lastTap.id === item.id && now - lastTap.t < 330) {
+    clearTimeout(clickT);
+    lastTap = { id: null, t: 0 };
+    editItem(item);
+    return;
+  }
+  lastTap = { id: item.id, t: now };
+  clearTimeout(clickT);
+  clickT = setTimeout(() => itemAction(item), hasTapAction(item) ? 240 : 0);
+}
+function hasTapAction(item) { return ['game', 'camera', 'ball', 'dice', 'spinner', 'extinguisher', 'cloud', 'fire', 'fan', 'duck', 'coin', 'sun', 'clock', 'plant'].includes(item.type); }
+function itemAction(item) {
+  if (!byId(item.id)) return;
+  switch (item.type) {
+    case 'game': openGame(item.d.gameId); break;
+    case 'camera': takeSnapshot(); break;
+    case 'ball': physics.nudge(item.id, (Math.random() - 0.5) * 30, -26, 0.3); sfx.boing(); break;
+    case 'coin': physics.nudge(item.id, (Math.random() - 0.5) * 4, -22, 0.6); sfx.coin(); break;
+    case 'duck': physics.nudge(item.id, (Math.random() - 0.5) * 8, -10, 0.2); sfx.boing(); toast('Quack!', 1200); break;
+    case 'dice': rollDice(item); break;
+    case 'spinner': elements.spin(item); break;
+    case 'extinguisher': elements.spray(item); break;
+    case 'cloud': if (item.d.mode === 'storm') elements.strike(item); else toast('Double-click the cloud to change the weather.'); break;
+    case 'fire': if (item.d.lit === false) { elements.ignite(item); commit(); } else toast('Hot! Rain, water or the extinguisher put it out.'); break;
+    case 'fan': item.d.on = !item.d.on; patch(els.get(item.id), item); sfx.click(); commit(); break;
+    case 'plant': waterPlant(item); break;
+    case 'clock': toast(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 1500); break;
+    case 'sun': toast('Drag the sun up for noon, down for sunset. Delete it for night.'); break;
+    default: break;
+  }
+}
+function cardAction(item, act) {
+  if (act === 'copy') { navigator.clipboard?.writeText(item.d.email).then(() => toast('Email copied!'), () => toast(item.d.email)); sfx.success(); }
+  if (act === 'mail') location.href = `mailto:${item.d.email}`;
+  if (act === 'link') { const a = els.get(item.id)?.querySelector('[data-act="link"]'); if (a && a.getAttribute('href') !== '#') open(a.href, '_blank', 'noopener,noreferrer'); }
+}
+layer.addEventListener('click', (e) => { if (e.target.closest('a[data-act]')) e.preventDefault(); });
+function rollDice(item) {
+  physics.nudge(item.id, (Math.random() - 0.5) * 14, -20, (Math.random() - 0.5) * 0.8);
+  sfx.roll();
+  setTimeout(() => { if (!byId(item.id)) return; item.d.face = 1 + Math.floor(Math.random() * 6); patch(els.get(item.id), item); toast(`🎲 ${item.d.face}`, 1200); commit(); }, 650);
+}
+function waterPlant(item) {
+  item.d.growth = Math.min(1, (item.d.growth ?? 0.5) + 0.12);
+  item.d.dry = 0;
+  patch(els.get(item.id), item);
+  sfx.splash();
+  toast(item.d.growth >= 1 ? 'Fully grown! 🌻' : 'Watered. It grows in the rain too.', 1600);
+  commit();
+}
+function editItem(item) {
+  closePanel();
+  if (TEXTY.has(item.type)) startEdit(item);
+  else openInspector(item);
 }
 
-// ---------------- pen ----------------
-function drawInk() {
+// ---------------- pen + eraser ----------------
+const penOpts = (() => { try { return { tool: 'pen', color: '#111111', size: 6, group: true, ...JSON.parse(localStorage.getItem('fewclicks:pen') || '{}') }; } catch { return { tool: 'pen', color: '#111111', size: 6, group: true }; } })();
+function savePenOpts() { try { localStorage.setItem('fewclicks:pen', JSON.stringify(penOpts)); } catch { /* private mode */ } }
+function drawInk(pred = []) {
   const c = ink, ctx = c.getContext('2d');
   const r = viewport.getBoundingClientRect();
-  if (c.width !== r.width) { c.width = r.width; c.height = r.height; }
+  if (c.width !== Math.round(r.width)) { c.width = r.width; c.height = r.height; }
   ctx.clearRect(0, 0, c.width, c.height);
-  ctx.lineWidth = 5 * camera.get().z;
-  ctx.lineCap = ctx.lineJoin = 'round';
-  ctx.strokeStyle = lights.darkness > 0.5 ? '#fff' : '#111';
-  ctx.beginPath();
-  stroke.pts.forEach((p, i) => { const s = camera.toScreen(p.x, p.y); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
-  ctx.stroke();
+  drawPreview(ctx, stroke, pred, camera.toScreen, camera.get().z);
 }
+function clearInk() { ink.getContext('2d').clearRect(0, 0, ink.width, ink.height); }
+let lastDoodle = { id: null, t: 0 };
 function finishStroke() {
-  const pts = stroke.pts;
+  const s = stroke;
   stroke = null;
-  ink.getContext('2d').clearRect(0, 0, ink.width, ink.height);
-  if (pts.length < 2) return;
-  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-  const pad = 8;
-  const minX = Math.min(...xs) - pad, minY = Math.min(...ys) - pad;
-  const w = Math.max(20, Math.max(...xs) + pad - minX), h = Math.max(20, Math.max(...ys) + pad - minY);
-  const path = pts.map((p, i) => `${i ? 'L' : 'M'}${(p.x - minX).toFixed(1)} ${(p.y - minY).toFixed(1)}`).join('');
-  addItem(makeItem('doodle', minX + w / 2, minY + h / 2, { path, w: Math.round(w), h: Math.round(h), width: 5, color: '#111' }), { quiet: true });
+  clearInk();
+  if (!s.pts.length) return;
+  const newStroke = { pts: s.pts, color: s.opts.color, size: s.opts.size, tool: s.opts.tool === 'eraser' ? 'pen' : s.opts.tool };
+  // writing: strokes made close together in time + space become one handwriting item
+  const prev = penOpts.group && lastDoodle.id && performance.now() - lastDoodle.t < 1400 && byId(lastDoodle.id);
+  if (prev && prev.d.strokes) {
+    const ws = worldStrokes(prev);
+    const b = bbox([...ws, newStroke]);
+    const pb = bbox(ws);
+    if (b.w < pb.w + 700 && b.h < pb.h + 400) {
+      const pk = packStrokes([...ws, newStroke]);
+      Object.assign(prev, { x: pk.x, y: pk.y, a: 0, s: 1 });
+      prev.d = { ...prev.d, strokes: pk.strokes, w: pk.w, h: pk.h };
+      rerender(prev);
+      lastDoodle.t = performance.now();
+      commit();
+      return;
+    }
+  }
+  const pk = packStrokes([newStroke]);
+  const it = addItem(makeItem('doodle', pk.x, pk.y, { strokes: pk.strokes, w: pk.w, h: pk.h }), { quiet: true });
+  select(null);
+  lastDoodle = { id: it.id, t: performance.now() };
+}
+function bbox(strokes) {
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  strokes.forEach((s) => s.pts.forEach(([x, y]) => { x1 = Math.min(x1, x); y1 = Math.min(y1, y); x2 = Math.max(x2, x); y2 = Math.max(y2, y); }));
+  return { w: x2 - x1, h: y2 - y1 };
+}
+let eraseDirty = false;
+function eraseAt(pt) {
+  const r = 14 / camera.get().z;
+  for (const it of [...board.items]) {
+    if (it.type !== 'doodle') continue;
+    const b = physics.bodyOf(it.id)?.bounds;
+    if (!b || pt.x < b.min.x - r || pt.x > b.max.x + r || pt.y < b.min.y - r || pt.y > b.max.y + r) continue;
+    if (!it.d.strokes) { removeItem(it.id); eraseDirty = true; sfx.tick(); continue; }
+    const ws = worldStrokes(it);
+    const keep = ws.filter((s) => !hitStroke(s, pt.x, pt.y, r));
+    if (keep.length === ws.length) continue;
+    eraseDirty = true;
+    sfx.tick();
+    if (!keep.length) { removeItem(it.id); continue; }
+    const pk = packStrokes(keep);
+    Object.assign(it, { x: pk.x, y: pk.y, a: 0, s: 1 });
+    it.d = { ...it.d, strokes: pk.strokes, w: pk.w, h: pk.h };
+    rerender(it);
+  }
 }
 
-// ---------------- selection + context bar ----------------
+// ---------------- links (string / tape / arrow) ----------------
+function startLink(item, kind) {
+  linking = { from: item.id, kind };
+  viewport.classList.add('linking');
+  toast(`Now tap another item to ${kind === 'arrow' ? 'point the arrow at' : kind === 'tape' ? 'tape it to' : 'tie it to'}. (Esc to cancel)`, 3000);
+}
+function finishLink(item) {
+  const l = linking;
+  linking = null;
+  viewport.classList.remove('linking');
+  if (!item || item.id === l.from) { toast('Cancelled.', 1000); return; }
+  const link = { id: `l${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, a: l.from, b: item.id, kind: l.kind };
+  board.links.push(link);
+  physics.addLink(link);
+  sfx.pop();
+  commit();
+}
+function removeLinksOf(id) {
+  board.links = board.links.filter((l) => { if (l.a === id || l.b === id) { physics.removeLink(l.id); return false; } return true; });
+}
+
+// ---------------- actions: one registry for the selection bar + the context menu ----------------
+function itemActions(item) {
+  const A = [];
+  const t = item.type;
+  const el = () => els.get(item.id);
+  const done = () => { const e = el(); if (e) { syncState(e, item); patch(e, item); } if (selected === item.id) renderCtxBar(item); commit(); };
+  if (TEXTY.has(t)) {
+    A.push({ id: 'edit', label: 'Edit text', icon: ICONS.edit, bar: true, kbd: 'Enter', run: () => startEdit(item) });
+    A.push({ id: 'style', label: 'Style…', icon: ICONS.style, bar: true, run: () => openInspector(item) });
+  } else {
+    A.push({ id: 'style', label: 'Edit…', icon: ICONS.edit, bar: true, kbd: 'Enter', run: () => openInspector(item) });
+  }
+  const quick = {
+    game: ['Open game', () => openGame(item.d.gameId)],
+    camera: ['Snap', () => takeSnapshot()],
+    dice: ['Roll', () => rollDice(item)],
+    spinner: ['Spin', () => elements.spin(item)],
+    extinguisher: ['Spray', () => elements.spray(item)],
+    plant: ['Water it', () => waterPlant(item)],
+    ball: ['Bounce', () => itemAction(item)],
+    fan: [item.d.on ? 'Turn off' : 'Turn on', () => { item.d.on = !item.d.on; done(); }],
+    fire: [item.d.lit === false ? 'Light' : 'Extinguish', () => { item.d.lit === false ? elements.ignite(item) : elements.extinguish(item); done(); }],
+    water: [item.d.frozen ? 'Melt' : 'Freeze', () => { item.d.frozen ? elements.thawWater(item) : elements.freezeWater(item); done(); }],
+    photo: ['Replace image…', () => { pendingImageFor = item; $('[data-file]').click(); }],
+    card: item.d.email ? ['Copy email', () => cardAction(item, 'copy')] : null,
+    cloud: item.d.mode === 'storm' ? ['⚡ Strike', () => elements.strike(item)] : null,
+  }[t];
+  if (quick) A.push({ id: 'quick', label: quick[0], text: true, bar: true, run: quick[1] });
+  if (t === 'cloud') A.push({ id: 'weather', label: 'Weather', icon: ICONS.cloud, sub: ['rain', 'snow', 'storm', 'none'].map((m) => ({ label: { rain: '🌧 Rain', snow: '❄ Snow', storm: '⛈ Storm', none: '☁ Calm' }[m], checked: (item.d.mode || 'rain') === m, run: () => { item.d.mode = m; rerender(item); commit(); } })) });
+  if (t === 'fan') A.push({ id: 'rev', label: 'Reverse direction', icon: ICONS.flip, run: () => { item.d.dir = (item.d.dir || 1) * -1; done(); } });
+  if (t === 'sticker') A.push({ id: 'flip', label: 'Mirror', icon: ICONS.flip, run: () => { item.d.flip = !item.d.flip; rerender(item); commit(); } });
+  A.push('-');
+  A.push({ id: 'pin', label: item.pin === 'pin' ? 'Unpin (drop it)' : 'Pin (hangs & swings)', icon: ICONS.pin, bar: true, kbd: 'P', pressed: item.pin === 'pin', run: () => { physics.setPin(item.id, item.pin === 'pin' ? null : 'pin'); if (!item.pin) physics.nudge(item.id, 0, -3, 0.05); done(); } });
+  A.push({ id: 'lock', label: item.pin === 'lock' ? 'Unlock' : 'Lock in place', icon: item.pin === 'lock' ? ICONS.lock : ICONS.unlock, bar: true, kbd: 'L', pressed: item.pin === 'lock', run: () => { physics.setPin(item.id, item.pin === 'lock' ? null : 'lock'); done(); } });
+  A.push({ id: 'rotL', label: 'Rotate left', icon: ICONS.rotL, bar: true, kbd: '[', run: () => { physics.setAngle(item.id, item.a - 0.26); done(); } });
+  A.push({ id: 'rotR', label: 'Rotate right', icon: ICONS.rotR, bar: true, kbd: ']', run: () => { physics.setAngle(item.id, item.a + 0.26); done(); } });
+  A.push({ id: 'straight', label: 'Straighten', icon: ICONS.reset, run: () => { physics.setAngle(item.id, 0); done(); } });
+  A.push({ id: 'smaller', label: 'Smaller', icon: ICONS.smaller, bar: true, kbd: '−', run: () => resizeItem(item, 1 / 1.2) });
+  A.push({ id: 'bigger', label: 'Bigger', icon: ICONS.bigger, bar: true, kbd: '+', run: () => resizeItem(item, 1.2) });
+  A.push('-');
+  A.push({ id: 'front', label: 'Bring to front', icon: ICONS.front, bar: true, run: () => { item.z = Math.max(...board.items.map((i) => i.z)) + 1; done(); place(el(), item, sizes.get(item.id).w, sizes.get(item.id).h); } });
+  A.push({ id: 'back', label: 'Send to back', icon: ICONS.back, run: () => { item.z = Math.min(...board.items.map((i) => i.z)) - 1; done(); place(el(), item, sizes.get(item.id).w, sizes.get(item.id).h); } });
+  const hasLinks = board.links.some((l) => l.a === item.id || l.b === item.id);
+  A.push({ id: 'tie', label: 'Connect', icon: ICONS.link, sub: [
+    { label: 'Tie with string to…', run: () => startLink(item, 'string') },
+    { label: 'Tape to…', run: () => startLink(item, 'tape') },
+    { label: 'Draw an arrow to…', run: () => startLink(item, 'arrow') },
+    ...(hasLinks ? ['-', { label: 'Remove connections', danger: true, run: () => { removeLinksOf(item.id); commit(); } }] : []),
+  ] });
+  A.push('-');
+  A.push({ id: 'copy', label: 'Copy', icon: ICONS.copy, kbd: 'Ctrl+C', run: () => copyItem(item) });
+  A.push({ id: 'dup', label: 'Duplicate', icon: ICONS.copy, bar: true, kbd: 'Ctrl+D', run: () => duplicate(item) });
+  A.push({ id: 'del', label: 'Delete', icon: ICONS.trash, bar: true, kbd: 'Del', danger: true, run: () => { removeItem(item.id); sfx.whoosh(); commit(); } });
+  return A;
+}
+function resizeItem(item, k) {
+  item.s = Math.max(0.3, Math.min(4, item.s * k));
+  delete item.pa;
+  const s = sizes.get(item.id);
+  physics.resize(item.id, s.w, s.h);
+  const e = els.get(item.id);
+  place(e, item, s.w, s.h);
+  commit();
+}
+function cloneItem(item, dx = 60, dy = 60) {
+  const c = JSON.parse(JSON.stringify(item, (k, v) => (k.startsWith('_') ? undefined : v)));
+  c.id = makeItem('x', 0, 0).id;
+  c.x += dx; c.y += dy;
+  delete c.pa;
+  return c;
+}
+function duplicate(item) { addItem(cloneItem(item)); }
+function copyItem(item) { clip = cloneItem(item, 0, 0); toast('Copied. Right-click empty space → Paste.', 1600); }
+function pasteAt(p) {
+  if (!clip) return;
+  const c = cloneItem(clip, 0, 0);
+  c.x = p.x; c.y = p.y;
+  addItem(c);
+}
+
+// selection bar
 const ctxBar = document.createElement('div');
 ctxBar.className = 'ctxbar';
 ctxBar.setAttribute('role', 'toolbar');
 ctxBar.setAttribute('aria-label', 'Item actions');
+ctxBar.hidden = true;
 document.body.appendChild(ctxBar);
+let barActions = [];
 function select(id) {
   if (selected && els.get(selected)) els.get(selected).classList.remove('sel');
   selected = id;
@@ -282,93 +578,139 @@ function select(id) {
   ctxBar.hidden = false;
 }
 function renderCtxBar(item) {
-  const b = (act, icon, title, pressed) => `<button type="button" data-cx="${act}" title="${title}" aria-label="${title}"${pressed != null ? ` aria-pressed="${pressed}"` : ''}>${ICONS[icon]}</button>`;
-  let h = b('pin', 'pin', item.pin === 'pin' ? 'Unpin (drop it)' : 'Pin (hangs & swings)', item.pin === 'pin') + b('lock', item.pin === 'lock' ? 'lock' : 'unlock', item.pin === 'lock' ? 'Unlock' : 'Lock in place', item.pin === 'lock');
-  h += '<i class="sep"></i>' + b('rotL', 'rotL', 'Rotate left') + b('rotR', 'rotR', 'Rotate right') + b('smaller', 'smaller', 'Smaller') + b('bigger', 'bigger', 'Bigger');
-  if (item.type === 'text' || item.type === 'title') h += '<i class="sep"></i>' + b('font', 'font', 'Change font') + b('edit', 'edit', 'Edit text') + (item.type === 'text' ? b('invert', 'invert', 'Invert colors') : '');
-  if (item.type === 'note') h += '<i class="sep"></i>' + b('edit', 'edit', 'Edit note') + b('invert', 'invert', 'Black / white note');
-  if (item.type === 'game') h += '<i class="sep"></i><button type="button" data-cx="open" class="txtbtn">Open game</button>';
-  if (item.type === 'camera') h += '<i class="sep"></i><button type="button" data-cx="snap" class="txtbtn">Snap</button>';
-  h += '<i class="sep"></i>' + b('front', 'front', 'Bring to front') + b('dup', 'copy', 'Duplicate') + b('del', 'trash', 'Delete');
-  ctxBar.innerHTML = h;
+  barActions = itemActions(item).filter((a) => a !== '-' && a.bar);
+  const groups = { edit: 0, style: 0, quick: 1, pin: 2, lock: 2, rotL: 3, rotR: 3, smaller: 3, bigger: 3, front: 4, dup: 4, del: 4 };
+  let g = -1;
+  ctxBar.innerHTML = barActions.map((a, i) => {
+    const sep = groups[a.id] !== g && g !== -1 ? '<i class="sep"></i>' : '';
+    g = groups[a.id];
+    return `${sep}<button type="button" data-cx="${i}" class="${a.text ? 'txtbtn' : ''}" title="${esc(a.label)}" aria-label="${esc(a.label)}"${a.pressed != null ? ` aria-pressed="${a.pressed}"` : ''}>${a.text ? esc(a.label) : a.icon}</button>`;
+  }).join('') + `<i class="sep"></i><button type="button" data-cx="more" title="More (right-click)" aria-label="More actions" aria-haspopup="menu">${ICONS.more}</button>`;
 }
 function positionCtxBar() {
   const it = byId(selected), s = sizes.get(selected);
   if (!it || !s) return;
-  const top = camera.toScreen(it.x, it.y - (s.h * it.s) / 2);
+  const top = camera.toScreen(it.x, it.y - (Math.max(s.w, s.h) * it.s) / 2);
   const r = viewport.getBoundingClientRect();
+  const c = camera.toScreen(it.x, it.y);
+  const off = c.x < -40 || c.y < -40 || c.x > r.width + 40 || c.y > r.height + 40;
+  ctxBar.style.visibility = off ? 'hidden' : '';
+  if (off) return;
   const bw = ctxBar.offsetWidth;
   const x = Math.max(8, Math.min(innerWidth - bw - 8, r.left + top.x - bw / 2));
   const y = Math.max(70, r.top + top.y - ctxBar.offsetHeight - 24);
   ctxBar.style.transform = `translate(${x}px, ${y}px)`;
 }
 ctxBar.addEventListener('pointerdown', (e) => e.stopPropagation());
+ctxBar.addEventListener('contextmenu', (e) => e.preventDefault());
 ctxBar.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-cx]');
   const item = byId(selected);
   if (!btn || !item) return;
-  const act = btn.dataset.cx;
-  const el = els.get(item.id);
   sfx.click();
-  if (act === 'pin') { physics.setPin(item.id, item.pin === 'pin' ? null : 'pin'); if (!item.pin) physics.nudge(item.id, 0, -3, 0.05); }
-  if (act === 'lock') physics.setPin(item.id, item.pin === 'lock' ? null : 'lock');
-  if (act === 'rotL' || act === 'rotR') physics.setAngle(item.id, item.a + (act === 'rotL' ? -0.26 : 0.26));
-  if (act === 'smaller' || act === 'bigger') { item.s = Math.max(0.3, Math.min(4, item.s * (act === 'bigger' ? 1.2 : 1 / 1.2))); delete item.pa; const s = sizes.get(item.id); physics.resize(item.id, s.w, s.h); }
-  if (act === 'front') { item.z = Math.max(...board.items.map((i) => i.z)) + 1; place(el, item, sizes.get(item.id).w, sizes.get(item.id).h); }
-  if (act === 'dup') { const c = JSON.parse(JSON.stringify(item)); c.id = makeItem('x', 0, 0).id; c.x += 60; c.y += 60; delete c.pa; addItem(c); return; }
-  if (act === 'del') { removeItem(item.id); sfx.whoosh(); commit(); return; }
-  if (act === 'edit') { startEdit(item); return; }
-  if (act === 'invert') { if (item.type === 'note') item.d.tone = item.d.tone === 'black' ? 'white' : 'black'; else item.d.invert = !item.d.invert; rerender(item); }
-  if (act === 'font') { openFontMenu(item, btn); return; }
-  if (act === 'open') { openGame(item.d.gameId); return; }
-  if (act === 'snap') { takeSnapshot(); return; }
-  syncState(el, item);
-  renderCtxBar(item);
-  commit();
+  if (btn.dataset.cx === 'more') { const r = btn.getBoundingClientRect(); openContextMenu(r.left, r.bottom + 6, item, true); return; }
+  barActions[+btn.dataset.cx]?.run();
 });
-function rerender(item) {
-  const old = els.get(item.id);
-  const el = renderItem(item);
-  old.replaceWith(el);
-  els.set(item.id, el);
-  const w = el.offsetWidth, h = el.offsetHeight;
-  sizes.set(item.id, { w, h });
-  delete item.pa;
-  physics.resize(item.id, w, h);
-  place(el, item, w, h);
-  syncState(el, item);
-  if (selected === item.id) { el.classList.add('sel'); renderCtxBar(item); }
-}
 
-function openFontMenu(item, anchor) {
-  const m = $('[data-fontmenu]');
-  m.innerHTML = FONTS.map((f) => `<button type="button" data-font="${f.id}" style="font-family:${f.family}" aria-pressed="${item.d.font === f.id}">${f.name}</button>`).join('');
-  const r = anchor.getBoundingClientRect();
-  m.style.left = `${Math.min(innerWidth - 300, Math.max(8, r.left - 120))}px`;
-  m.style.top = `${r.bottom + 8}px`;
-  m.hidden = false;
-  m.onclick = (e) => {
-    const b = e.target.closest('[data-font]');
-    if (!b) return;
-    item.d.font = b.dataset.font;
-    rerender(item);
-    m.hidden = true;
-    commit();
+// ---------------- context menu ----------------
+function openContextMenu(x, y, item, focus = false) {
+  lastMenuAt = performance.now();
+  if (editing) stopEdit();
+  inspector.close();
+  if (item) {
+    select(item.id);
+    menu.open(x, y, [{ header: label(item).slice(0, 34) }, ...itemActions(item)], { focus });
+  } else {
+    select(null);
+    menuPoint = camera.toWorld(x, y);
+    menu.open(x, y, canvasEntries(), { focus });
+  }
+}
+function canvasEntries() {
+  const at = (type, d = {}, extra = {}, opts = {}) => () => {
+    const p = menuPoint || viewCenter();
+    addItem(makeItem(type, p.x, type === 'water' ? GROUND_Y - (d.h || 200) / 2 : Math.min(GROUND_Y - 80, p.y), d, extra), opts);
   };
+  const g = physics.gravity;
+  const w = elements.world.wind;
+  const sun = board.items.find((i) => i.type === 'sun');
+  return [
+    { label: 'Add here', icon: ICONS.plus, sub: [
+      { label: 'Text', icon: ICONS.text, run: at('text', { text: 'Your text', font: 'marker', size: 56 }, {}, { edit: true }) },
+      { label: 'Sticky note', icon: ICONS.note, run: at('note', { text: 'Write something…', paper: 'classic' }, {}, { edit: true }) },
+      { label: 'Card', icon: ICONS.card, run: at('card', { title: 'New card', body: 'Double-click to edit me.', style: 'white' }, {}, { inspect: true }) },
+      { label: 'Speech bubble', icon: ICONS.bubble, run: at('bubble', { text: 'Hi!' }, {}, { edit: true }) },
+      { label: 'Photo…', icon: ICONS.photo, run: () => { pendingImageFor = null; $('[data-file]').click(); } },
+      { label: 'Gallery…', icon: ICONS.gallery, run: () => openGallery('Stickers', menuPoint) },
+    ] },
+    { label: 'Elements', icon: ICONS.cloud, sub: GALLERY.Elements.map((e) => ({ label: e.name, run: () => placeEntry(e, menuPoint) })) },
+    { label: 'Toys', icon: ICONS.ball, sub: GALLERY.Toys.map((e) => ({ label: e.name, run: () => placeEntry(e, menuPoint) })) },
+    { label: 'Paste', icon: ICONS.paste, kbd: 'Ctrl+V', disabled: !clip, run: () => pasteAt(menuPoint || viewCenter()) },
+    '-',
+    { label: 'World', icon: ICONS.world, sub: [
+      { header: 'Gravity' },
+      ...['on', 'low', 'off'].map((m) => ({ label: { on: 'Full gravity', low: 'Moon gravity', off: 'Zero gravity' }[m], checked: g === m, run: () => setGravity(m) })),
+      '-', { header: 'Wind' },
+      ...[[0, 'Calm'], [0.5, 'Breeze →'], [-0.5, 'Breeze ←'], [1.5, 'Gale →']].map(([v, l]) => ({ label: l, checked: w === v, run: () => { elements.world.wind = v; commit(); toast(v ? `Wind: ${l}` : 'The wind dropped.', 1400); } })),
+      '-',
+      { label: sun ? 'Night (remove the sun)' : 'Day (add the sun)', run: () => toggleDay() },
+    ] },
+    { label: 'Fit everything', icon: ICONS.fit, kbd: '0', run: fitAll },
+    { label: 'Take a snapshot', icon: ICONS.camera, kbd: 'C', run: takeSnapshot },
+    { label: 'Export board…', icon: ICONS.download, run: () => $('[data-export]').click() },
+  ];
+}
+function toggleDay() {
+  const sun = board.items.find((i) => i.type === 'sun');
+  if (sun) { removeItem(sun.id); toast('Good night 🌙 Lamps, torches and fires still glow.'); }
+  else { const c = viewCenter(-0.35); addItem(makeItem('sun', c.x, Math.max(-800, c.y), {}, { s: 1.4 })); toast('Good morning! ☀️'); }
+  commit();
+}
+function setGravity(m) { physics.setGravity(m); syncGravityUI(); commit(); sfx.whoosh(); }
+
+// ---------------- inspector ----------------
+function openInspector(item) {
+  closePanel();
+  select(item.id);
+  const s = camera.toScreen(item.x, item.y);
+  const r = viewport.getBoundingClientRect();
+  const sz = sizes.get(item.id) || { w: 100 };
+  inspector.open(item, { x: r.left + s.x + (sz.w * item.s * camera.get().z) / 2, y: r.top + s.y });
+}
+let insT = 0;
+function inspectorChange(item, key, v, live) {
+  if (!byId(item.id)) return;
+  inspectorDirty = true;
+  const el = els.get(item.id);
+  if (key === '$s') { item.s = Math.max(0.3, Math.min(4, v)); delete item.pa; const s = sizes.get(item.id); physics.resize(item.id, s.w, s.h); place(el, item, s.w, s.h); return; }
+  if (key === 'frozen') { v ? elements.freezeWater(item) : elements.thawWater(item); return; }
+  if (key === 'lit') { v ? elements.ignite(item) : elements.extinguish(item); return; }
+  if (key === '$labels') item.d.labels = String(v).split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 10);
+  else if (key === '$ink') item.d.strokes.forEach((st) => { st.color = v; });
+  else if (key === '$width') { item.d.strokesScale = v; item.d.strokes.forEach((st) => { st.base = st.base || st.size; st.size = st.base * v; }); }
+  else item.d[key] = v;
+  if (PATCH_KEYS.has(key)) { patch(el, item); if (key === 'dir') renderCtxBar(item); return; }
+  clearTimeout(insT);
+  const go = () => { rerender(item); if (key === 'mode') inspector.refresh(); };
+  if (live) insT = setTimeout(go, 140); else go();
+}
+function inspectorAction(item, act) {
+  if (act === '$image') { pendingImageFor = item; $('[data-file]').click(); }
+  if (act === '$strike') elements.strike(item);
 }
 
-// ---------------- text editing ----------------
+// ---------------- text editing (inline) ----------------
 function startEdit(item) {
   const el = els.get(item.id);
   const t = el?.querySelector('[data-edit], .title-text');
   if (!t) return;
+  inspector.close();
   editing = { item, t };
-  physics.setPin(item.id, item.pin || 'pin');
+  if (item.pin !== 'lock') physics.setPin(item.id, item.pin || 'pin');
   t.contentEditable = 'true';
   t.spellcheck = false;
   t.focus();
-  const sel = getSelection();
-  sel.selectAllChildren(t);
+  getSelection().selectAllChildren(t);
   el.classList.add('editing');
   t.addEventListener('blur', stopEdit, { once: true });
 }
@@ -388,6 +730,7 @@ function openGame(id) {
   const g = DATA?.games.find((x) => x.id === id);
   const p = $('[data-panel]');
   if (!g) return;
+  inspector.close();
   const verb = g.status === 'released' ? 'Get it on' : 'Wishlist on';
   p.innerHTML = `<button class="pbtn close" type="button" data-pclose aria-label="Close">${ICONS.close}</button>
     <figure class="p-cover"><img src="${esc(g.media.cover)}" alt="${esc(g.title)} cover"></figure>
@@ -409,7 +752,7 @@ function openGame(id) {
   p.querySelector('[data-pclose]').focus();
   sfx.whoosh();
 }
-function closePanel() { const p = $('[data-panel]'); p.classList.remove('open'); setTimeout(() => (p.hidden = true), 300); }
+function closePanel() { const p = $('[data-panel]'); if (p.hidden) return; p.classList.remove('open'); setTimeout(() => (p.hidden = true), 300); }
 $('[data-panel]').addEventListener('click', (e) => {
   if (e.target.closest('[data-pclose]')) closePanel();
   const s = e.target.closest('[data-pin-shot]');
@@ -430,7 +773,7 @@ async function takeSnapshot() {
   setTimeout(() => document.body.classList.remove('flash'), 350);
   try {
     const items = [...board.items].sort((a, b) => a.z - b.z);
-    const shot = await snapshot({ items, els, sizes, cam, view: { w: r.width, h: r.height }, lightCanvas, background: '#ffffff' });
+    const shot = await snapshot({ items, els, sizes, cam, view: { w: r.width, h: r.height }, lightCanvas, fxCanvas, groundY: GROUND_Y, background: '#ffffff' });
     download(shot.png, `fewclicks-board-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`);
     const c = viewCenter(-0.3);
     addItem(makeItem('photo', c.x, c.y, { src: shot.jpeg, caption: 'snapshot ✶', wide: true }, { pin: null, a: (Math.random() - 0.5) * 0.3, s: 0.8 }));
@@ -441,27 +784,100 @@ async function takeSnapshot() {
   }
 }
 
+// ---------------- gallery (stickers, elements, toys, paper, your uploads) ----------------
+const W = (svg) => svg;
+const GALLERY = {
+  Elements: [
+    { name: '🌧 Rain cloud', svg: cloudSvg('rain'), type: 'cloud', d: { mode: 'rain', amount: 0.6 }, x: { s: 1.4 } },
+    { name: '❄ Snow cloud', svg: cloudSvg('snow'), type: 'cloud', d: { mode: 'snow', amount: 0.5 }, x: { s: 1.4 } },
+    { name: '⛈ Storm cloud', svg: cloudSvg('storm'), type: 'cloud', d: { mode: 'storm', amount: 0.7 }, x: { s: 1.5 } },
+    { name: '🔥 Campfire', svg: fireSvg(), type: 'fire', d: { lit: true, size: 1 } },
+    { name: '💧 Water pool', svg: W('<svg viewBox="0 0 100 60"><rect x="4" y="14" width="92" height="42" rx="6" fill="#bfe6ff" stroke="#111" stroke-width="3"/><path d="M4 22q11-8 23 0t23 0 23 0 23 0" fill="none" stroke="#4c9be8" stroke-width="4"/></svg>'), type: 'water', d: { w: 900, h: 200 } },
+    { name: '🌀 Fan', svg: fanSvg(), type: 'fan', d: { on: true, power: 1, dir: 1 } },
+    { name: '🧲 Magnet', svg: magnetSvg(), type: 'magnet', d: { strength: 1 } },
+    { name: '🌸 Flower', svg: plantSvg('flower'), type: 'plant', d: { species: 'flower', growth: 0.4 } },
+    { name: '🌻 Sunflower', svg: plantSvg('sunflower'), type: 'plant', d: { species: 'sunflower', growth: 0.4 } },
+    { name: '🌵 Cactus', svg: plantSvg('cactus'), type: 'plant', d: { species: 'cactus', growth: 0.5 } },
+    { name: '☀️ Sun', svg: OBJECTS.sun, type: 'sun', d: {}, x: { s: 1.4 } },
+    { name: '💡 Lamp', svg: OBJECTS.lamp, type: 'lamp', d: { temp: 'warm' } },
+    { name: '🔦 Torch', svg: OBJECTS.torch, type: 'torch', d: { beam: 0.42 }, x: { a: 0.3 } },
+  ],
+  Toys: [
+    { name: 'Bouncy ball', svg: OBJECTS.ball, type: 'ball' },
+    { name: 'Balloon', svg: OBJECTS.balloon, type: 'balloon' },
+    { name: 'Dice', svg: diceSvg(5), type: 'dice', d: { face: 5 } },
+    { name: 'Rubber duck', svg: duckSvg(), type: 'duck' },
+    { name: 'Spinner wheel', svg: spinnerSvg(['A', 'B', 'C', 'D', 'E', 'F']), type: 'spinner', d: {} },
+    { name: 'Clock', svg: clockSvg(), type: 'clock' },
+    { name: 'Coin', svg: coinSvg(), type: 'coin' },
+    { name: 'Paperclip', svg: clipSvg(), type: 'clip' },
+    { name: 'Ice cube', svg: iceSvg(), type: 'ice' },
+    { name: 'Extinguisher', svg: extinguisherSvg(), type: 'extinguisher' },
+    { name: 'Instant camera', svg: OBJECTS.camera, type: 'camera' },
+  ],
+  Paper: [
+    ...['classic', 'lined', 'grid', 'torn', 'index', 'black'].map((p) => ({ name: `${p[0].toUpperCase()}${p.slice(1)} note`, html: `<span class="mini-note p-${p}"></span>`, type: 'note', d: { text: 'Write something…', paper: p }, edit: true })),
+    { name: 'White card', html: '<span class="mini-card white">Card</span>', type: 'card', d: { title: 'New card', body: 'Double-click to edit me.', style: 'white' }, inspect: true },
+    { name: 'Black card', html: '<span class="mini-card">Card</span>', type: 'card', d: { title: 'New card', body: 'Double-click to edit me.', style: 'black' }, inspect: true },
+    { name: 'Ticket card', html: '<span class="mini-card ticket">Ticket</span>', type: 'card', d: { title: 'Admit one', body: 'FewClicks playtest night', style: 'ticket' }, inspect: true },
+    { name: 'Speech bubble', html: '<span class="mini-bubble">Hi!</span>', type: 'bubble', d: { text: 'Hi!' }, edit: true },
+    ...['bubbles', 'neon', 'pixel', 'script', 'bungee', 'outline'].map((f) => ({ name: `${FONTS.find((x) => x.id === f).name} text`, html: `<span class="mini-txt" style="font-family:${FONTS.find((x) => x.id === f).family}">Aa</span>`, type: 'text', d: { text: 'Your text', font: f, size: 64 }, edit: true })),
+  ],
+};
+function placeEntry(e, at) {
+  if (e.type === 'sun' && board.items.some((i) => i.type === 'sun')) { const s = board.items.find((i) => i.type === 'sun'); select(s.id); camera.centerOn(s.x, s.y); toast('There is only one sun. Drag it to change the time of day.'); return; }
+  const p = at || viewCenter(e.type === 'cloud' ? -0.3 : -0.15);
+  const d = JSON.parse(JSON.stringify(e.d || {}));
+  if (e.type === 'spinner' && !d.labels && DATA) d.labels = DATA.games.map((g) => g.title.split(' ')[0]).slice(0, 6);
+  const y = e.type === 'water' ? GROUND_Y - (d.h || 200) / 2 : Math.min(GROUND_Y - 120, p.y);
+  addItem(makeItem(e.type, p.x + (at ? 0 : (Math.random() - 0.5) * 160), y, d, { ...(e.x || {}) }), { edit: !!e.edit, inspect: !!e.inspect });
+  if (e.type === 'cloud' && d.mode === 'storm') toast('Storm clouds strike lightning every few seconds. Tap one to strike now.');
+}
+let galleryAt = null;
+function openGallery(tab = 'Stickers', at = null) {
+  galleryAt = at;
+  const g = $('[data-gallery]');
+  g.hidden = false;
+  showTab(tab);
+}
+function showTab(tab) {
+  const g = $('[data-gallery]');
+  g.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+  const body = g.querySelector('.g-body');
+  if (tab === 'Stickers') {
+    body.innerHTML = Object.entries(STICKER_GROUPS).map(([name, keys]) => `<h4>${name}</h4><div class="g-grid">${keys.map((k) => `<button type="button" data-stk="${k}" aria-label="${k} sticker" title="${k}">${STICKERS[k]}</button>`).join('')}</div>`).join('');
+  } else if (tab === 'Yours') {
+    const srcs = [...new Set(board.items.filter((i) => (i.type === 'photo') && /^data:/.test(i.d.src || '')).map((i) => i.d.src))];
+    body.innerHTML = `<p class="g-note">Photos you added live only in this browser.</p><div class="g-grid wide"><button type="button" class="g-up" data-upload>${ICONS.photo}<span>Add photo</span></button>${srcs.map((s, i) => `<button type="button" data-reuse="${i}" aria-label="Your photo ${i + 1}"><img src="${s}" alt=""></button>`).join('')}</div>`;
+    body._srcs = srcs;
+  } else {
+    body.innerHTML = `<div class="g-grid labeled">${GALLERY[tab].map((e, i) => `<button type="button" data-entry="${tab}:${i}" title="${esc(e.name)}"><span class="g-art">${e.svg || e.html}</span><span class="g-l">${esc(e.name)}</span></button>`).join('')}</div>`;
+  }
+}
+
 // ---------------- UI ----------------
 function buildUI() {
   const tools = [
     ['select', '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M5 3l14 8-6 2-3 6z"/></svg>', 'Select & toss (V)'],
     ['hand', ICONS.hand, 'Pan (H or hold Space)'],
-    ['pen', ICONS.pen, 'Draw (D)'],
+    ['pen', ICONS.pen, 'Draw & write (D) · works with pen tablets'],
     '|',
     ['text', ICONS.text, 'Add text (T)'],
-    ['note', ICONS.note, 'Add note (N)'],
-    ['sticker', ICONS.sticker, 'Stickers (S)'],
+    ['note', ICONS.note, 'Add sticky note (N)'],
+    ['card', ICONS.card, 'Add card (K)'],
+    ['gallery', ICONS.sticker, 'Gallery: stickers, elements, toys (G)'],
     ['photo', ICONS.photo, 'Add your photo'],
     '|',
-    ['sun', ICONS.sun, 'Sun'],
-    ['lamp', ICONS.lamp, 'Hanging lamp'],
-    ['torch', ICONS.torch, 'Torch'],
-    ['ball', ICONS.ball, 'Bouncy ball'],
-    ['balloon', ICONS.balloon, 'Balloon'],
+    ['cloud', ICONS.cloud, 'Rain cloud'],
+    ['fire', ICONS.fire, 'Campfire'],
+    ['water', ICONS.water, 'Water pool'],
+    ['elements', ICONS.plant, 'More elements: snow, storm, fan, magnet, plants…'],
+    '|',
     ['camera', ICONS.camera, 'Camera snapshot (C)'],
   ];
   $('[data-tools]').innerHTML = tools.map((t) => (t === '|' ? '<i class="sep"></i>' : `<button type="button" data-tool="${t[0]}" title="${t[2]}" aria-label="${t[2]}">${t[1]}</button>`)).join('');
-  $('[data-stickers]').innerHTML = Object.entries(STICKERS).map(([k, svg]) => `<button type="button" data-stk="${k}" aria-label="${k} sticker">${svg}</button>`).join('');
+  const g = $('[data-gallery]');
+  g.innerHTML = `<div class="g-tabs" role="tablist">${['Stickers', 'Elements', 'Toys', 'Paper', 'Yours'].map((t) => `<button type="button" role="tab" data-tab="${t}">${t}</button>`).join('')}<button type="button" class="g-x" data-gclose aria-label="Close gallery">${ICONS.close}</button></div><div class="g-body"></div>`;
   $('[data-undo]').innerHTML = ICONS.undo; $('[data-redo]').innerHTML = ICONS.redo;
   $('[data-export]').innerHTML = ICONS.download; $('[data-import]').innerHTML = ICONS.upload;
   $('[data-reset]').innerHTML = ICONS.reset; $('[data-info]').innerHTML = ICONS.info;
@@ -472,6 +888,7 @@ function buildUI() {
   paintSnd();
   onSoundChange(paintSnd);
   snd.addEventListener('click', toggleSound);
+  buildPenBar();
   setTool('select');
   mountPrototypeBadge(11, 'Whiteboard');
 
@@ -483,33 +900,36 @@ function buildUI() {
     if (['select', 'hand', 'pen'].includes(t)) { setTool(t); return; }
     const c = viewCenter();
     if (t === 'text') addItem(makeItem('text', c.x, c.y, { text: 'Your text', font: 'marker', size: 56 }), { edit: true });
-    if (t === 'note') addItem(makeItem('note', c.x, c.y, { text: 'Write something…', tone: 'white' }, { a: (Math.random() - 0.5) * 0.08 }), { edit: true });
-    if (t === 'sticker') toggleDrawer();
-    if (t === 'photo') $('[data-file]').click();
+    if (t === 'note') addItem(makeItem('note', c.x, c.y, { text: 'Write something…', paper: 'classic' }, { a: (Math.random() - 0.5) * 0.08 }), { edit: true });
+    if (t === 'card') addItem(makeItem('card', c.x, c.y, { title: 'New card', body: 'Double-click to edit me.', style: 'white' }), { inspect: true });
+    if (t === 'gallery') toggleGallery('Stickers');
+    if (t === 'elements') toggleGallery('Elements');
+    if (t === 'photo') { pendingImageFor = null; $('[data-file]').click(); }
     if (t === 'camera') takeSnapshot();
-    if (['lamp', 'torch', 'ball', 'balloon'].includes(t)) addItem(makeItem(t, c.x, viewCenter(-0.35).y, {}, t === 'torch' ? { a: 0.3 } : {}));
-    if (t === 'sun') {
-      const sun = board.items.find((i) => i.type === 'sun');
-      if (sun) { select(sun.id); camera.centerOn(sun.x, sun.y); toast('There is only one sun. Drag it to change the time of day.'); }
-      else { addItem(makeItem('sun', c.x, Math.max(200, viewCenter(-0.35).y), {}, { s: 1.4 })); toast('Good morning! ☀️'); }
-    }
+    if (t === 'cloud') placeEntry(GALLERY.Elements[0]);
+    if (t === 'fire') placeEntry(GALLERY.Elements[3]);
+    if (t === 'water') placeEntry(GALLERY.Elements[4]);
   });
-  $('[data-stickers]').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-stk]');
-    if (!b) return;
-    const c = viewCenter(-0.38);
-    addItem(makeItem('sticker', c.x + (Math.random() - 0.5) * 300, c.y, { key: b.dataset.stk }, { a: (Math.random() - 0.5) * 0.6 }));
+  g.addEventListener('pointerdown', (e) => e.stopPropagation());
+  g.addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-tab]');
+    if (tab) { showTab(tab.dataset.tab); return; }
+    if (e.target.closest('[data-gclose]')) { g.hidden = true; return; }
+    const stk = e.target.closest('[data-stk]');
+    const at = galleryAt;
+    if (stk) { const c = at || viewCenter(-0.38); addItem(makeItem('sticker', c.x + (at ? 0 : (Math.random() - 0.5) * 300), Math.min(GROUND_Y - 100, c.y), { key: stk.dataset.stk }, { a: (Math.random() - 0.5) * 0.6 })); return; }
+    const en = e.target.closest('[data-entry]');
+    if (en) { const [tabName, i] = en.dataset.entry.split(':'); placeEntry(GALLERY[tabName][+i], at); if (GALLERY[tabName][+i].edit || GALLERY[tabName][+i].inspect) g.hidden = true; return; }
+    if (e.target.closest('[data-upload]')) { pendingImageFor = null; $('[data-file]').click(); return; }
+    const re = e.target.closest('[data-reuse]');
+    if (re) { const src = g.querySelector('.g-body')._srcs[+re.dataset.reuse]; const c = at || viewCenter(-0.1); addItem(makeItem('photo', c.x, Math.min(GROUND_Y - 150, c.y), { src, caption: '' }, { a: (Math.random() - 0.5) * 0.1 })); }
   });
   $('[data-file]').addEventListener('change', async (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
-    try {
-      const img = await compressImage(f);
-      const c = viewCenter(-0.1);
-      addItem(makeItem('photo', c.x, c.y, { src: img.src, caption: f.name.replace(/\.[^.]+$/, '').slice(0, 28), ratio: `${img.w} / ${img.h}` }, { a: (Math.random() - 0.5) * 0.1 }));
-      toast('Photo added. It stays in this browser only.');
-    } catch { toast('Could not read that image.'); }
+    await addPhotoFile(f, pendingImageFor);
+    pendingImageFor = null;
   });
   $('[data-undo]').addEventListener('click', undo);
   $('[data-redo]').addEventListener('click', redo);
@@ -517,30 +937,23 @@ function buildUI() {
   $('[data-zout]').addEventListener('click', () => camera.zoomAt(0.8));
   $('[data-fit]').addEventListener('click', fitAll);
   $('[data-flash]').addEventListener('click', () => setFlash(!flashlight));
-  $('[data-gravity]').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-g]');
-    if (!b) return;
-    physics.setGravity(b.dataset.g);
-    syncGravityUI();
-    commit();
-    sfx.whoosh();
-  });
+  $('[data-gravity]').addEventListener('click', (e) => { const b = e.target.closest('[data-g]'); if (b) setGravity(b.dataset.g); });
   $('[data-export]').addEventListener('click', () => { exportFile(serialize()); toast('Board exported as a JSON file.'); });
   $('[data-import]').addEventListener('click', () => $('[data-importfile]').click());
   $('[data-importfile]').addEventListener('change', async (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
-    try { board = await importFile(f); mountAll(); physics.setGravity(board.gravity || 'on'); syncGravityUI(); if (board.cam) camera.set(board.cam); commit(); toast('Board imported.'); } catch { toast('That file is not a FewClicks board.'); }
+    try { board = normalize(await importFile(f)); mountAll(); physics.setGravity(board.gravity || 'on'); syncGravityUI(); if (board.cam) camera.set(board.cam); commit(); toast('Board imported.'); } catch { toast('That file is not a FewClicks board.'); }
   });
   $('[data-reset]').addEventListener('click', () => {
     if (!confirm('Reset the board? Everything you added will be removed from this browser.')) return;
     clearBoard();
-    board = seedBoard(DATA);
+    board = normalize(seedBoard(DATA));
     mountAll();
     physics.setGravity('on');
     syncGravityUI();
-    camera.fit({ x: 1300, y: 250, w: 3800, h: 2500 }, 40);
+    startView();
     physics.settle(30);
     commit();
     toast('Fresh board!');
@@ -552,15 +965,79 @@ function buildUI() {
   info.addEventListener('toggle', () => { if (info.open) { const kb = Math.round(JSON.stringify(serialize()).length * 2 / 1024); $('[data-storage]').textContent = `This board uses about ${kb} KB of your browser's local storage.`; } });
 
   document.addEventListener('pointerdown', (e) => {
-    if (!e.target.closest('[data-stickers], [data-tool="sticker"]')) $('[data-stickers]').hidden = true;
-    if (!e.target.closest('[data-fontmenu], [data-cx="font"]')) $('[data-fontmenu]').hidden = true;
+    if (!e.target.closest('[data-gallery], [data-tool="gallery"], [data-tool="elements"]')) $('[data-gallery]').hidden = true;
+  });
+  // drop or paste images: they become photos (still local only)
+  viewport.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.items || [])].some((i) => i.kind === 'file')) { e.preventDefault(); viewport.classList.add('dropping'); } });
+  viewport.addEventListener('dragleave', () => viewport.classList.remove('dropping'));
+  viewport.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    viewport.classList.remove('dropping');
+    const p = camera.toWorld(e.clientX, e.clientY);
+    for (const f of [...(e.dataTransfer?.files || [])].filter((x) => x.type.startsWith('image/')).slice(0, 6)) await addPhotoFile(f, null, p);
+  });
+  document.addEventListener('paste', async (e) => {
+    if (editing || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+    const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/'));
+    if (f) { e.preventDefault(); await addPhotoFile(f); return; }
+    if (clip) { e.preventDefault(); pasteAt(cursor ? camera.toWorld(cursor.x + viewport.getBoundingClientRect().left, cursor.y + viewport.getBoundingClientRect().top) : viewCenter()); }
   });
 }
-function toggleDrawer() { const d = $('[data-stickers]'); d.hidden = !d.hidden; }
+async function addPhotoFile(f, replaceFor = null, at = null) {
+  try {
+    const img = await compressImage(f);
+    if (replaceFor && byId(replaceFor.id)) {
+      replaceFor.d.src = img.src;
+      replaceFor.d.ratio = `${img.w} / ${img.h}`;
+      rerender(replaceFor);
+      commit();
+      inspector.refresh();
+      toast('Image replaced. It stays in this browser only.');
+      return;
+    }
+    const c = at || viewCenter(-0.1);
+    addItem(makeItem('photo', c.x, Math.min(GROUND_Y - 150, c.y), { src: img.src, caption: f.name.replace(/\.[^.]+$/, '').slice(0, 28), ratio: `${img.w} / ${img.h}` }, { a: (Math.random() - 0.5) * 0.1 }));
+    toast('Photo added. It stays in this browser only.');
+  } catch { toast('Could not read that image.'); }
+}
+function toggleGallery(tab) {
+  const g = $('[data-gallery]');
+  const cur = g.querySelector('[aria-selected="true"]')?.dataset.tab;
+  if (!g.hidden && cur === tab) { g.hidden = true; return; }
+  openGallery(tab);
+}
+function buildPenBar() {
+  const bar = $('[data-penbar]');
+  const tools = [['pen', ICONS.pen, 'Pen (pressure-sensitive)'], ['marker', ICONS.marker, 'Marker'], ['highlighter', ICONS.highlighter, 'Highlighter'], ['eraser', ICONS.eraser, 'Eraser (E) · also the pen’s eraser end']];
+  const inks = ['#111111', '#ffffff', '#ff3b30', '#ff8a1a', '#ffd23f', '#2fd66b', '#4c7dff', '#9b5cff'];
+  bar.innerHTML = `<div class="pb-g">${tools.map(([t, ic, l]) => `<button type="button" data-pt="${t}" title="${l}" aria-label="${l}">${ic}</button>`).join('')}</div><i class="sep"></i><div class="pb-g">${inks.map((c) => `<button type="button" class="ink-dot" data-pc="${c}" style="--c:${c}" aria-label="Ink ${c}"></button>`).join('')}</div><i class="sep"></i><div class="pb-g">${[[3, 'S'], [6, 'M'], [12, 'L']].map(([s, l]) => `<button type="button" data-ps="${s}" aria-label="Size ${l}" class="sz"><i style="--s:${s * 1.4}px"></i></button>`).join('')}</div><i class="sep"></i><label class="pb-group" title="Strokes written close together become one movable word"><input type="checkbox" data-pg> Group writing</label>`;
+  const paint = () => {
+    bar.querySelectorAll('[data-pt]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pt === penOpts.tool)));
+    bar.querySelectorAll('[data-pc]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pc === penOpts.color)));
+    bar.querySelectorAll('[data-ps]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.ps === penOpts.size)));
+    bar.querySelector('[data-pg]').checked = !!penOpts.group;
+    viewport.dataset.pen = penOpts.tool;
+  };
+  bar.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.pt) penOpts.tool = b.dataset.pt;
+    if (b.dataset.pc) { penOpts.color = b.dataset.pc; if (penOpts.tool === 'eraser') penOpts.tool = 'pen'; }
+    if (b.dataset.ps) penOpts.size = +b.dataset.ps;
+    sfx.tick();
+    savePenOpts();
+    paint();
+  });
+  bar.addEventListener('change', (e) => { if (e.target.matches('[data-pg]')) { penOpts.group = e.target.checked; savePenOpts(); } });
+  bar.addEventListener('pointerdown', (e) => e.stopPropagation());
+  paint();
+}
 function setTool(t) {
   tool = t;
   document.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
   viewport.dataset.tool = t;
+  $('[data-penbar]').hidden = t !== 'pen';
+  if (t === 'pen') select(null);
 }
 function setFlash(on) {
   flashlight = on;
@@ -572,19 +1049,19 @@ function syncGravityUI() { document.querySelectorAll('[data-g]').forEach((b) => 
 function syncHistoryUI() { $('[data-undo]').disabled = !history.canUndo; $('[data-redo]').disabled = !history.canRedo; }
 function applySnapshot(s) {
   if (!s) return;
-  board = s;
+  board = normalize(s);
   mountAll();
   physics.setGravity(s.gravity || 'on');
   syncGravityUI();
   save();
   syncHistoryUI();
 }
-function undo() { applySnapshot(history.undo(serialize())); sfx.tick(); }
-function redo() { applySnapshot(history.redo()); sfx.tick(); }
+function undo() { inspector.close(); applySnapshot(history.undo(serialize())); sfx.tick(); }
+function redo() { inspector.close(); applySnapshot(history.redo()); sfx.tick(); }
 function fitAll() {
   if (!board.items.length) { camera.centerOn(CENTER.x, CENTER.y, 0.5); return; }
   let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
-  for (const it of board.items) { const s = sizes.get(it.id) || { w: 100, h: 100 }; x1 = Math.min(x1, it.x - s.w / 2); y1 = Math.min(y1, it.y - s.h / 2); x2 = Math.max(x2, it.x + s.w / 2); y2 = Math.max(y2, it.y + s.h / 2); }
+  for (const it of board.items) { const s = sizes.get(it.id) || { w: 100, h: 100 }; const r = (Math.max(s.w, s.h) * it.s) / 2; x1 = Math.min(x1, it.x - r); y1 = Math.min(y1, it.y - r); x2 = Math.max(x2, it.x + r); y2 = Math.max(y2, it.y + r); }
   camera.fit({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 }, 40);
 }
 
@@ -600,17 +1077,30 @@ function toast(text, ms = 2600) {
 // ---------------- keyboard ----------------
 addEventListener('keydown', (e) => {
   if (editing) { if (e.key === 'Escape') editing.t.blur(); return; }
+  if (menu.isOpen || inspector.isOpen && inspector.el.contains(document.activeElement)) return;
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || document.querySelector('dialog[open]')) return;
   const k = e.key.toLowerCase();
+  const item = selected && byId(selected);
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'c' && item) { e.preventDefault(); copyItem(item); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'd' && item) { e.preventDefault(); duplicate(item); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 'v') return; // handled by the paste event
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    e.preventDefault();
+    if (item) { const s = camera.toScreen(item.x, item.y); const r = viewport.getBoundingClientRect(); openContextMenu(r.left + s.x, r.top + s.y, item, true); }
+    else openContextMenu(innerWidth / 2, innerHeight / 2, null, true);
+    return;
+  }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (k === ' ') { spaceDown = true; viewport.classList.add('space'); e.preventDefault(); return; }
-  if ((k === 'delete' || k === 'backspace') && selected) { removeItem(selected); commit(); return; }
-  if (k === 'escape') { select(null); closePanel(); return; }
-  const item = selected && byId(selected);
-  if (k === 'p' && item) { ctxBar.querySelector('[data-cx="pin"]')?.click(); return; }
-  if (k === 'l' && item) { ctxBar.querySelector('[data-cx="lock"]')?.click(); return; }
+  if ((k === 'delete' || k === 'backspace') && item) { removeItem(item.id); commit(); return; }
+  if (k === 'escape') { if (linking) { linking = null; viewport.classList.remove('linking'); toast('Cancelled.', 900); } select(null); closePanel(); inspector.close(); $('[data-gallery]').hidden = true; return; }
+  if (k === 'enter' && item) { e.preventDefault(); editItem(item); return; }
+  if (item) {
+    const a = itemActions(item).find((x) => x !== '-' && x.kbd && x.kbd.toLowerCase() === k);
+    if (a && ['p', 'l', '[', ']'].includes(k)) { a.run(); return; }
+  }
   if (item && /^arrow/.test(k)) {
     e.preventDefault();
     const d = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, -1], arrowdown: [0, 1] }[k];
@@ -619,9 +1109,11 @@ addEventListener('keydown', (e) => {
   }
   const map = { v: 'select', h: 'hand', d: 'pen' };
   if (map[k]) { setTool(map[k]); return; }
+  if (k === 'e') { setTool('pen'); penOpts.tool = 'eraser'; $('[data-penbar] [data-pt="eraser"]')?.click(); return; }
   if (k === 't') $('[data-tool="text"]').click();
   if (k === 'n') $('[data-tool="note"]').click();
-  if (k === 's') toggleDrawer();
+  if (k === 'k') $('[data-tool="card"]').click();
+  if (k === 's' || k === 'g') toggleGallery('Stickers');
   if (k === 'c') takeSnapshot();
   if (k === 'f') setFlash(!flashlight);
   if (k === '+' || k === '=') camera.zoomAt(1.25);
@@ -631,3 +1123,8 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => { if (e.key === ' ') { spaceDown = false; viewport.classList.remove('space'); } });
 addEventListener('beforeunload', () => save(true));
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(true); });
+
+// test hook for local automated checks (only with ?debug in the URL; nothing leaves the browser)
+if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, get board() { return board; }, byId, select, commit };
+
+init();

@@ -71,6 +71,10 @@ export const sfx = {
   success: play(() => [523, 659, 784, 1047].forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.18, vol: 0.3, delay: i * 0.08 }))),
   error: play(() => { tone({ freq: 300, to: 200, type: 'sawtooth', dur: 0.15, vol: 0.15 }); tone({ freq: 200, to: 120, type: 'sawtooth', dur: 0.2, vol: 0.15, delay: 0.15 }); }),
   tick: play(() => tone({ freq: 1800, type: 'square', dur: 0.02, vol: 0.08 })),
+  thunder: play(() => { noise({ dur: 1.6, vol: 0.7, filter: 120 }); noise({ dur: 0.4, vol: 0.4, filter: 900 }); tone({ freq: 70, to: 35, type: 'sine', dur: 1.2, vol: 0.5 }); }),
+  splash: play(() => noise({ dur: 0.18, vol: 0.12, filter: 2400 })),
+  fizz: play(() => { noise({ dur: 0.6, vol: 0.3, filter: 4000 }); tone({ freq: 400, to: 120, type: 'sine', dur: 0.4, vol: 0.15 }); }),
+  roll: play(() => [0, 0.07, 0.13, 0.2, 0.3].forEach((d) => tone({ freq: 300 + Math.random() * 200, type: 'square', dur: 0.03, vol: 0.12, delay: d }))),
 };
 
 export const soundOn = () => on;

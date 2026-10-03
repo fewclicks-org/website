@@ -18,10 +18,12 @@
   <a class="skip-link" href="#tools">Skip to tools</a>
   <h1 class="sr-only">FewClicks Studios interactive whiteboard</h1>
 
-  <div class="viewport" data-viewport aria-label="Whiteboard. Drag to pan, scroll or pinch to zoom." role="application">
-    <div class="layer" data-layer><div class="board" aria-hidden="true"><div class="tray"></div></div></div>
-    <canvas class="ink" data-ink aria-hidden="true"></canvas>
+  <div class="viewport" data-viewport aria-label="Infinite whiteboard. Drag to pan, scroll or pinch to zoom, right-click or long-press for the menu." role="application">
+    <div class="ground" aria-hidden="true"></div>
+    <div class="layer" data-layer></div>
+    <canvas class="fx" data-fx aria-hidden="true"></canvas>
     <canvas class="lights" data-lights aria-hidden="true"></canvas>
+    <canvas class="ink" data-ink aria-hidden="true"></canvas>
   </div>
 
   <header class="topbar">
@@ -45,9 +47,8 @@
   </header>
 
   <nav class="tools" id="tools" data-tools aria-label="Tools"></nav>
-  <div class="drawer" data-stickers hidden role="dialog" aria-label="Stickers"></div>
-  <div class="fontmenu" data-fontmenu hidden role="dialog" aria-label="Fonts"></div>
-  <div class="ctxbar-host"></div>
+  <div class="penbar" data-penbar hidden role="toolbar" aria-label="Pen options"></div>
+  <div class="gallery" data-gallery hidden role="dialog" aria-label="Gallery"></div>
 
   <aside class="nav-box" aria-label="Minimap and zoom">
     <canvas class="minimap" data-minimap tabindex="0" aria-label="Minimap: click to move the view"></canvas>
@@ -67,7 +68,8 @@
     </ul>
     <p class="muted" data-storage></p>
     <h3>Tips</h3>
-    <p class="muted"><b>Drag</b> to move, <b>flick</b> to toss · tap a <b>pin</b> to drop an item · <b>double-click</b> to add or edit text · <b>scroll / pinch</b> to zoom · <b>Space + drag</b> to pan · <b>F</b> flashlight · <b>C</b> snapshot · <b>Del</b> delete.</p>
+    <p class="muted"><b>Drag</b> to move, <b>flick</b> to toss · tap a <b>pin</b> to drop an item · <b>double-click</b> anything to edit it · <b>right-click</b> or <b>long-press</b> for the menu · <b>scroll / pinch</b> to zoom · <b>Space + drag</b> to pan · <b>D</b> pen (pressure-sensitive with a tablet), <b>E</b> eraser · <b>G</b> gallery · <b>F</b> flashlight · <b>C</b> snapshot · <b>Del</b> delete.</p>
+    <p class="muted">Weather: rain is blocked by anything above it, grows plants and puts out fires. Snow piles up and freezes water. Paper burns. Fans blow, magnets pull metal, storm clouds strike.</p>
     <p class="muted">Contact: <a href="mailto:admin@fewclicks.org">admin@fewclicks.org</a></p>
     <button type="button" class="btn wide" data-close>Got it</button>
   </dialog>

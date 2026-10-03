@@ -1,22 +1,26 @@
-// Camera: pan + zoom of the world layer. screen = (world - cam) * zoom.
+// Camera: pan + zoom of the world layer over an endless canvas. screen = (world - cam) * zoom.
+// The dot grid and the ground line are drawn in screen space so they never run out.
 
-export const MIN_Z = 0.08;
+export const MIN_Z = 0.05;
 export const MAX_Z = 4;
 
-export function createCamera(viewport, layer, { width, height, onChange }) {
+export function createCamera(viewport, layer, { groundY, onChange }) {
   const cam = { x: 0, y: 0, z: 0.5 };
   const rect = () => viewport.getBoundingClientRect();
   const clampZ = (z) => Math.max(MIN_Z, Math.min(MAX_Z, z));
 
+  // the canvas is infinite: only keep the numbers sane
   function clampPan() {
-    const r = rect();
-    const vw = r.width / cam.z, vh = r.height / cam.z;
-    const m = 0.5; // allow half a screen of margin around the board
-    cam.x = Math.max(-vw * m, Math.min(width - vw * (1 - m), cam.x));
-    cam.y = Math.max(-vh * m, Math.min(height - vh * (1 - m), cam.y));
+    cam.x = Math.max(-1e6, Math.min(1e6, cam.x));
+    cam.y = Math.max(-1e6, Math.min(groundY + 2000, cam.y));
   }
   function apply() {
     layer.style.transform = `translate(${-cam.x * cam.z}px, ${-cam.y * cam.z}px) scale(${cam.z})`;
+    // endless dot grid (coarser when zoomed far out) + the ground line
+    const g = 40 * cam.z * (cam.z < 0.2 ? 5 : 1);
+    viewport.style.backgroundSize = `${g}px ${g}px`;
+    viewport.style.backgroundPosition = `${(-cam.x * cam.z) % g}px ${(-cam.y * cam.z) % g}px`;
+    viewport.style.setProperty('--gy', `${Math.round((groundY - cam.y) * cam.z)}px`);
     viewport.style.setProperty('--z', cam.z);
     onChange?.(cam);
   }
@@ -105,5 +109,5 @@ export function bindGestures(viewport, camera, { shouldPan, onPinchStart }) {
   };
   addEventListener('pointerup', up);
   addEventListener('pointercancel', up);
-  return { get pinching() { return !!pinch; }, get panning() { return !!pan; } };
+  return { get pinching() { return !!pinch; }, get panning() { return !!pan; }, cancel() { pan = null; viewport.classList.remove('panning'); } };
 }

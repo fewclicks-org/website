@@ -1,7 +1,7 @@
 // Lighting: a screen-space darkness layer with holes cut by light sources, plus per-item directional shadows.
 // No sun on the board = night. Lamps (point lights), torches (cone spotlights) and a cursor flashlight light it up.
 
-export function createLights(canvas, { height }) {
+export function createLights(canvas, { groundY }) {
   const ctx = canvas.getContext('2d');
   let W = 0, H = 0, dpr = 1;
   const resize = () => {
@@ -13,12 +13,14 @@ export function createLights(canvas, { height }) {
   resize();
 
   let darkness = 0;
+  let flash = 0; // lightning flash 0..1, decays every frame
+  const LAMP = { warm: '255,200,120', cool: '170,210,255', white: '255,255,240' };
 
   /** Compute ambient darkness from the sun (higher sun = brighter day). */
   function ambient(items) {
     const sun = items.find((i) => i.type === 'sun');
     if (!sun) return { dark: 0.9, sun: null };
-    const h = Math.min(1, Math.max(0, sun.y / height)); // 0 top .. 1 floor
+    const h = Math.min(1, Math.max(0, sun.y / groundY)); // 0 high in the sky .. 1 on the ground
     const day = 1 - Math.pow(h, 1.6);
     return { dark: Math.max(0, Math.min(0.78, 0.78 * (1 - day))), sun, warm: Math.max(0, h - 0.45) };
   }
@@ -29,6 +31,9 @@ export function createLights(canvas, { height }) {
   function draw(items, cam, flashlight) {
     const amb = ambient(items);
     darkness = amb.dark;
+    flash *= 0.86;
+    if (flash < 0.02) flash = 0;
+    const t = performance.now();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     // sunset tint
@@ -37,9 +42,9 @@ export function createLights(canvas, { height }) {
       ctx.fillStyle = `rgba(255,120,40,${amb.warm * 0.18})`;
       ctx.fillRect(0, 0, W, H);
     }
-    if (darkness < 0.06) { darkness = 0; return darkness; }
+    if (darkness < 0.06) { darkness = 0; drawFlash(); return darkness; }
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = `rgba(6,6,10,${darkness})`;
+    ctx.fillStyle = `rgba(6,6,10,${darkness * (1 - flash)})`;
     ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'destination-out';
     const S = (x, y) => ({ x: (x - cam.x) * cam.z, y: (y - cam.y) * cam.z });
@@ -54,11 +59,18 @@ export function createLights(canvas, { height }) {
       } else if (it.type === 'torch') {
         const ang = it.a; // torch points along its +x axis
         const tip = S(it.x + Math.cos(ang) * 48 * it.s, it.y + Math.sin(ang) * 48 * it.s);
-        const len = 1300 * it.s * cam.z, spread = 0.42;
+        const len = 1300 * it.s * cam.z, spread = it.d?.beam || 0.42;
         const g = ctx.createRadialGradient(tip.x, tip.y, 0, tip.x, tip.y, len);
         g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.6, 'rgba(0,0,0,.8)'); g.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.moveTo(tip.x, tip.y); ctx.arc(tip.x, tip.y, len, ang - spread, ang + spread); ctx.closePath(); ctx.fill();
+      } else if (it.type === 'fire' && it.d?.lit !== false) {
+        const p = S(it.x, it.y - 20 * it.s);
+        const r = (520 + Math.sin(t / 90 + it.x) * 26 + Math.sin(t / 37) * 14) * (it.d?.size || 1) * it.s * cam.z;
+        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+        g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.5, 'rgba(0,0,0,.8)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
       } else if (it.type === 'sun' && amb.sun) {
         const p = S(it.x, it.y);
         const r = 420 * cam.z;
@@ -73,18 +85,27 @@ export function createLights(canvas, { height }) {
       g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.7, 'rgba(0,0,0,.9)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(flashlight.x, flashlight.y, r, 0, Math.PI * 2); ctx.fill();
     }
-    // warm glow for lamps
+    // warm glow for lamps and fires
     ctx.globalCompositeOperation = 'lighter';
     for (const it of items) {
-      if (it.type !== 'lamp') continue;
-      const p = S(it.x, it.y + 30 * it.s);
-      const r = 300 * it.s * cam.z;
+      const fire = it.type === 'fire' && it.d?.lit !== false;
+      if (it.type !== 'lamp' && !fire) continue;
+      const p = S(it.x, it.y + (fire ? -20 : 30) * it.s);
+      const r = (fire ? 360 * (it.d?.size || 1) * (1 + Math.sin(t / 70 + it.x) * 0.05) : 300) * it.s * cam.z;
+      const col = fire ? '255,140,40' : LAMP[it.d?.temp] || LAMP.warm;
       const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-      g.addColorStop(0, `rgba(255,200,120,${0.22 * darkness})`); g.addColorStop(1, 'rgba(255,200,120,0)');
+      g.addColorStop(0, `rgba(${col},${(fire ? 0.3 : 0.22) * darkness})`); g.addColorStop(1, `rgba(${col},0)`);
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalCompositeOperation = 'source-over';
+    drawFlash();
     return darkness;
+  }
+  function drawFlash() {
+    if (!flash) return;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = `rgba(235,240,255,${flash * 0.55})`;
+    ctx.fillRect(0, 0, W, H);
   }
 
   /**
@@ -93,10 +114,11 @@ export function createLights(canvas, { height }) {
    */
   function shadows(items, els) {
     const sun = items.find((i) => i.type === 'sun');
-    const lamps = items.filter((i) => i.type === 'lamp' || i.type === 'torch');
+    const lamps = items.filter((i) => i.type === 'lamp' || i.type === 'torch' || (i.type === 'fire' && i.d?.lit !== false));
     for (const it of items) {
       const el = els.get(it.id);
       if (!el) continue;
+      if (it.type === 'water' || it.type === 'cloud') { setShadow(el, it.type === 'cloud' ? 'drop-shadow(0 30px 24px rgba(0,0,0,.12))' : 'none'); continue; }
       if (it.type === 'sun' || it.type === 'lamp') { setShadow(el, it.type === 'sun' ? 'drop-shadow(0 0 40px rgba(255,200,40,.9))' : 'drop-shadow(0 0 24px rgba(255,220,150,.9))'); continue; }
       let lx, ly, strength;
       if (sun) { lx = sun.x; ly = sun.y; strength = 1; }
@@ -125,5 +147,5 @@ export function createLights(canvas, { height }) {
     el.style.filter = v;
   }
 
-  return { draw, shadows, resize, get darkness() { return darkness; } };
+  return { draw, shadows, resize, strike: (v = 1) => { flash = Math.max(flash, v); }, get flashing() { return flash > 0; }, get darkness() { return darkness; } };
 }

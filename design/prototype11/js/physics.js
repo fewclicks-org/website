@@ -1,11 +1,13 @@
-// Matter.js physics for the whiteboard: full gravity, toss, pins that swing, locks, buoyant balloons.
+// Matter.js physics for the whiteboard: an endless ground line, full gravity, toss, pins that swing,
+// locks, links (string / tape), plus hooks the elements module uses for wind, water, heat and magnets.
 // window.Matter comes from ../vendor/matter.min.js.
 
 import { pinOffset } from './items.js';
 
 const GRAVITY = { on: 1, low: 0.25, off: 0 };
+const CIRCLES = new Set(['ball', 'sun', 'coin', 'clock']);
 
-export function createPhysics({ width, height, reduced = false }) {
+export function createPhysics({ groundY, reduced = false }) {
   const M = window.Matter;
   const { Engine, Bodies, Body, Composite, Constraint, Sleeping, Events } = M;
   const engine = Engine.create({ enableSleeping: true });
@@ -14,31 +16,35 @@ export function createPhysics({ width, height, reduced = false }) {
   engine.velocityIterations = 6;
   const world = engine.world;
 
-  const T = 400;
-  Composite.add(world, [
-    Bodies.rectangle(width / 2, height + T / 2, width + T * 2, T, { isStatic: true, label: 'floor', friction: 0.8 }),
-    Bodies.rectangle(width / 2, -T / 2, width + T * 2, T, { isStatic: true, label: 'ceiling' }),
-    Bodies.rectangle(-T / 2, height / 2, T, height + T * 2, { isStatic: true, label: 'wall' }),
-    Bodies.rectangle(width + T / 2, height / 2, T, height + T * 2, { isStatic: true, label: 'wall' }),
-  ]);
+  // one very wide static ground: the canvas is infinite sideways and upwards
+  const T = 2000;
+  const ground = Bodies.rectangle(0, groundY + T / 2, 4e6, T, { isStatic: true, label: 'ground', friction: 0.8 });
+  Composite.add(world, ground);
 
-  const map = new Map(); // id -> { item, body, w, h, pinC }
+  const map = new Map(); // id -> { item, body, w, h, pinC, frozen, still }
+  const links = new Map(); // id -> { link, cs: [constraints] }
+  const hooks = [];
   let drag = null;
   let gravityMode = 'on';
 
   function bodyFor(item, w, h) {
     const sw = Math.max(8, w * item.s), sh = Math.max(8, h * item.s);
+    const t = item.type;
     const opts = {
       angle: item.a || 0,
-      restitution: item.type === 'ball' ? 0.86 : item.type === 'balloon' ? 0.5 : 0.12,
-      friction: 0.6,
-      frictionAir: item.type === 'balloon' ? 0.04 : 0.015,
-      density: item.type === 'title' ? 0.004 : item.type === 'balloon' ? 0.0004 : 0.0012,
+      restitution: t === 'ball' ? 0.86 : t === 'balloon' ? 0.5 : t === 'duck' || t === 'coin' ? 0.35 : 0.12,
+      friction: t === 'ice' ? 0.02 : 0.6,
+      frictionAir: t === 'balloon' ? 0.04 : 0.015,
+      density: t === 'title' ? 0.004 : t === 'balloon' ? 0.0004 : t === 'coin' || t === 'magnet' || t === 'clip' ? 0.003 : 0.0012,
       sleepThreshold: 50,
       label: item.id,
     };
-    if (item.type === 'ball' || item.type === 'sun') return Bodies.circle(item.x, item.y, Math.min(sw, sh) / 2, opts);
-    if (item.type === 'balloon') return Bodies.circle(item.x, item.y - sh * 0.12, sw / 2.1, opts);
+    if (t === 'water') {
+      Object.assign(opts, { isSensor: !item.d?.frozen, friction: 0.01, frictionStatic: 0.02 });
+      return Bodies.rectangle(item.x, item.y, sw, sh, opts);
+    }
+    if (CIRCLES.has(t)) return Bodies.circle(item.x, item.y, Math.min(sw, sh) / 2, opts);
+    if (t === 'balloon') return Bodies.circle(item.x, item.y - sh * 0.12, sw / 2.1, opts);
     return Bodies.rectangle(item.x, item.y, sw, sh, { ...opts, chamfer: { radius: Math.min(10, sw / 6, sh / 6) } });
   }
 
@@ -64,26 +70,31 @@ export function createPhysics({ width, height, reduced = false }) {
   }
 
   function add(item, w, h) {
+    // nothing may start below the ground line
+    const hh = (h * item.s) / 2;
+    if (item.y + hh > groundY) item.y = groundY - hh - (item.type === 'water' ? 0 : 1);
     const body = bodyFor(item, w, h);
-    const rec = { item, body, w, h, pinC: null, still: 0 };
+    const rec = { item, body, w, h, pinC: null, still: 0, frozen: false };
     map.set(item.id, rec);
     Composite.add(world, body);
     applyPin(rec);
     // pins hold their tilt on load (friction of a real pushpin); a toss or bump sets them swinging
     if (item.pin === 'pin' && !item.v) freeze(rec);
     if (item.v) Body.setVelocity(body, item.v);
+    links.forEach((L) => { if (L.link.a === item.id || L.link.b === item.id) attachLink(L); });
     return rec;
   }
 
   function remove(id) {
     const rec = map.get(id);
     if (!rec) return;
+    links.forEach((L) => { if (L.link.a === id || L.link.b === id) detachLink(L); });
     if (rec.pinC) Composite.remove(world, rec.pinC);
     Composite.remove(world, rec.body);
     map.delete(id);
   }
 
-  function clear() { [...map.keys()].forEach(remove); }
+  function clear() { [...map.keys()].forEach(remove); links.clear(); }
 
   /** Rebuild a body after its size/scale changed (keeps position, angle, pin). */
   function resize(id, w, h) {
@@ -121,6 +132,40 @@ export function createPhysics({ width, height, reduced = false }) {
     Sleeping.set(rec.body, false);
   }
 
+  /** Move an item (static or not) to a position, e.g. a drifting cloud. */
+  function moveTo(id, x, y) {
+    const rec = map.get(id);
+    if (!rec) return;
+    Body.setPosition(rec.body, { x, y });
+    if (rec.pinC) { rec.pinC.pointA.x += x - rec.item.x; rec.pinC.pointA.y += y - rec.item.y; rec.item.pa = { ...rec.pinC.pointA }; }
+    rec.item.x = x; rec.item.y = y;
+  }
+
+  // ---- links: string (springy), tape (welded), arrow (drawn only) ----
+  function attachLink(L) {
+    detachLink(L);
+    const A = map.get(L.link.a), B = map.get(L.link.b);
+    if (!A || !B || L.link.kind === 'arrow') return;
+    if (L.link.kind === 'tape') {
+      const dx = B.body.position.x - A.body.position.x, dy = B.body.position.y - A.body.position.y;
+      const d = Math.hypot(dx, dy) || 1, px = (-dy / d) * 24, py = (dx / d) * 24;
+      L.cs = [1, -1].map((k) => Constraint.create({ bodyA: A.body, bodyB: B.body, pointA: toLocal(A.body, k * px, k * py), pointB: toLocal(B.body, k * px, k * py), stiffness: 0.6, damping: 0.1 }));
+    } else {
+      L.cs = [Constraint.create({ bodyA: A.body, bodyB: B.body, length: L.link.len || 200, stiffness: 0.02, damping: 0.05 })];
+    }
+    L.cs.forEach((c) => Composite.add(world, c));
+    thaw(A); thaw(B);
+  }
+  const toLocal = (body, x, y) => { const c = Math.cos(-body.angle), s = Math.sin(-body.angle); return { x: x * c - y * s, y: x * s + y * c }; };
+  function detachLink(L) { (L.cs || []).forEach((c) => Composite.remove(world, c)); L.cs = []; }
+  function addLink(link) {
+    const L = { link, cs: [] };
+    links.set(link.id, L);
+    if (!link.len) { const A = map.get(link.a), B = map.get(link.b); if (A && B) link.len = Math.round(Math.hypot(A.body.position.x - B.body.position.x, A.body.position.y - B.body.position.y)); }
+    attachLink(L);
+  }
+  function removeLink(id) { const L = links.get(id); if (L) { detachLink(L); links.delete(id); } }
+
   // ---- dragging & tossing ----
   function dragStart(id, pt) {
     const rec = map.get(id);
@@ -144,16 +189,17 @@ export function createPhysics({ width, height, reduced = false }) {
     const { rec } = drag;
     if (drag.mode === 'lock') {
       const prev = { ...rec.body.position };
-      Body.setPosition(rec.body, { x: pt.x + drag.dx, y: pt.y + drag.dy });
+      const h = (rec.h * rec.item.s) / 2;
+      Body.setPosition(rec.body, { x: pt.x + drag.dx, y: Math.min(groundY - (rec.item.type === 'water' ? h : h * 0.5), pt.y + drag.dy) });
       Body.setVelocity(rec.body, { x: rec.body.position.x - prev.x, y: rec.body.position.y - prev.y });
     } else if (drag.mode === 'pin') {
       rec.pinC.pointA.x = pt.x + drag.dx;
-      rec.pinC.pointA.y = pt.y + drag.dy;
+      rec.pinC.pointA.y = Math.min(groundY - 10, pt.y + drag.dy);
       rec.item.pa = { x: rec.pinC.pointA.x, y: rec.pinC.pointA.y };
       Sleeping.set(rec.body, false);
     } else {
       drag.c.pointA.x = pt.x;
-      drag.c.pointA.y = pt.y;
+      drag.c.pointA.y = Math.min(groundY, pt.y);
     }
   }
   function dragEnd() {
@@ -190,15 +236,13 @@ export function createPhysics({ width, height, reduced = false }) {
   const byBody = (b) => map.get(b.label);
   Events.on(engine, 'collisionStart', (ev) => {
     for (const { bodyA, bodyB } of ev.pairs) {
+      if (bodyA.isSensor || bodyB.isSensor) continue;
       const a = byBody(bodyA), b = byBody(bodyB);
       if (a?.frozen && !bodyB.isStatic) thaw(a);
       if (b?.frozen && !bodyA.isStatic) thaw(b);
     }
   });
 
-  // balloons float: counter gravity with a little extra lift.
-  // Pinned items get extra damping and are put to sleep once they hang still: Matter never sleeps
-  // constrained bodies on its own, so without this they would tremble forever (and burn CPU).
   Events.on(engine, 'beforeUpdate', () => {
     const g = engine.gravity.y * engine.gravity.scale;
     map.forEach((rec) => {
@@ -209,11 +253,30 @@ export function createPhysics({ width, height, reduced = false }) {
           if (++rec.still > 45) freeze(rec);
         } else rec.still = 0;
       }
+      // balloons float: counter gravity with a little extra lift
       if (item.type === 'balloon' && !body.isStatic && !body.isSleeping) {
         Body.applyForce(body, body.position, { x: Math.sin(engine.timing.timestamp / 900 + body.id) * 0.00002 * body.mass, y: -g * 1.35 * body.mass });
       }
     });
+    for (const fn of hooks) fn(g);
   });
+
+  /** Apply a force (in units of gravity accelerations) to a body; wakes frozen items. */
+  function push(rec, fx, fy) {
+    if (!rec || rec.body.isStatic && !rec.frozen) return;
+    if (rec.frozen) { if (Math.hypot(fx, fy) < 0.15) return; thaw(rec); }
+    const k = engine.gravity.scale * rec.body.mass;
+    Sleeping.set(rec.body, false);
+    Body.applyForce(rec.body, rec.body.position, { x: fx * k, y: fy * k });
+  }
+  function setVelocity(rec, vx, vy) { if (!rec.body.isStatic) Body.setVelocity(rec.body, { x: vx, y: vy }); }
+  function setSolid(id, solid, friction) {
+    const rec = map.get(id);
+    if (!rec) return;
+    rec.body.isSensor = !solid;
+    if (friction != null) rec.body.friction = friction;
+    map.forEach((r) => Sleeping.set(r.body, false));
+  }
 
   /** Advance the simulation; returns true if anything moved. */
   function step(dt) {
@@ -236,9 +299,14 @@ export function createPhysics({ width, height, reduced = false }) {
   function settle(steps = 240) { for (let i = 0; i < steps; i++) step(16.667); }
 
   return {
-    engine, map, add, remove, clear, resize, setPin, nudge, setAngle, dragStart, dragMove, dragEnd, setGravity, step, settle,
+    M, engine, map, groundY, add, remove, clear, resize, setPin, nudge, setAngle, moveTo, dragStart, dragMove, dragEnd, setGravity, step, settle,
+    addLink, removeLink, links, push, setVelocity, setSolid, thaw: (id) => thaw(map.get(id)), onBeforeUpdate: (fn) => hooks.push(fn),
     get gravity() { return gravityMode; },
     get dragging() { return !!drag; },
+    get dragId() { return drag?.rec.item.id || null; },
     bodyOf: (id) => map.get(id)?.body,
+    recOf: (id) => map.get(id),
+    /** Bodies that block rain / lightning (solid, not sensors). */
+    solids: () => [...map.values()].filter((r) => !r.body.isSensor).map((r) => r.body),
   };
 }

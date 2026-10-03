@@ -32,7 +32,7 @@ function wrap(ctx, text, maxW) {
 /**
  * @param items sorted by z; els Map(id->el); sizes Map(id->{w,h}); cam {x,y,z}; view {w,h}; lightCanvas
  */
-export async function snapshot({ items, els, sizes, cam, view, lightCanvas, background = '#ffffff' }) {
+export async function snapshot({ items, els, sizes, cam, view, lightCanvas, fxCanvas, groundY, background = '#ffffff' }) {
   const dpr = 1.5;
   const c = document.createElement('canvas');
   c.width = Math.round(view.w * dpr);
@@ -46,6 +46,12 @@ export async function snapshot({ items, els, sizes, cam, view, lightCanvas, back
   ctx.fillStyle = 'rgba(0,0,0,.08)';
   const g = 40, x0 = Math.floor(cam.x / g) * g, y0 = Math.floor(cam.y / g) * g;
   for (let x = x0; x < cam.x + view.w / cam.z; x += g) for (let y = y0; y < cam.y + view.h / cam.z; y += g) ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
+  if (groundY != null && groundY < cam.y + view.h / cam.z) {
+    ctx.fillStyle = '#f1f1f2';
+    ctx.fillRect(cam.x, groundY, view.w / cam.z, cam.y + view.h / cam.z - groundY);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(cam.x, groundY - 2, view.w / cam.z, 4);
+  }
 
   // preload every image/svg used by visible items
   const jobs = [];
@@ -77,7 +83,7 @@ export async function snapshot({ items, els, sizes, cam, view, lightCanvas, back
     ctx.shadowBlur = 14;
     ctx.shadowOffsetY = 6;
     // box backgrounds (polaroid frames, notes, cards)
-    el.querySelectorAll('.polaroid, .note, .card').forEach((box) => {
+    el.querySelectorAll('.polaroid, .note, .card, .bubble, .pool').forEach((box) => {
       const o = offsetIn(box, el);
       ctx.fillStyle = getComputedStyle(box).backgroundColor;
       ctx.fillRect(o.x, o.y, box.offsetWidth, box.offsetHeight);
@@ -98,7 +104,7 @@ export async function snapshot({ items, els, sizes, cam, view, lightCanvas, back
       const w = svg.clientWidth || b.width / cam.z / it.s, h = svg.clientHeight || b.height / cam.z / it.s;
       ctx.drawImage(svg._snap, o.x + (svg.offsetLeft || 0), o.y + (svg.offsetTop || 0), w, h);
     });
-    el.querySelectorAll('.title-text, .title-sub, .txt, .note-t, .note-sign, figcaption, .card-k, .card-mail').forEach((t) => {
+    el.querySelectorAll('.title-text, .title-sub, .txt, .note-t, .note-sign, .bubble-t, figcaption, .card-k, .card-b, .card-mail').forEach((t) => {
       const cs = getComputedStyle(t);
       const o = offsetIn(t, el);
       ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
@@ -112,8 +118,9 @@ export async function snapshot({ items, els, sizes, cam, view, lightCanvas, back
     });
   }
 
-  // lighting on top (already in screen space)
+  // weather + lighting on top (already in screen space)
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (fxCanvas) ctx.drawImage(fxCanvas, 0, 0, c.width, c.height);
   if (lightCanvas) ctx.drawImage(lightCanvas, 0, 0, c.width, c.height);
 
   // tiny watermark

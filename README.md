@@ -2,7 +2,7 @@
 
 Website for **FewClicks**, a game studio making games you can love in a few clicks. Contact: admin@fewclicks.org
 
-We have shortlisted **5 prototype designs** (1 Bubble Pop Planet, 2 Physics Playground, 6 Studio Portfolio · Lens, 8 Chapter · Cinematic, 11 Whiteboard · Physics & Light). Prototype 11 is a local-only app: boards are saved in the visitor's `localStorage`, nothing is sent to any server, and a strict Content-Security-Policy only allows the site's own files. The site root (`index.html`) is a gallery linking to each one. Once we pick a winner, it becomes the real site.
+We have shortlisted **5 prototype designs** (1 Bubble Pop Planet, 2 Physics Playground, 6 Studio Portfolio · Lens, 8 Chapter · Cinematic, 11 Whiteboard · Physics & Light). Prototype 11 is an infinite-canvas, local-only app (right-click or long-press for its menu, double-click to edit anything, weather and elements, pen/tablet writing): boards are saved in the visitor's `localStorage`, nothing is sent to any server, and a strict Content-Security-Policy only allows the site's own files. The site root (`index.html`) is a gallery linking to each one. Once we pick a winner, it becomes the real site.
 
 ## Structure
 
