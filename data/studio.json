@@ -1,0 +1,39 @@
+{
+  "name": "FewClicks",
+  "legalName": "FewClicks Studio",
+  "tagline": "Games you can love in a few clicks.",
+  "description": "FewClicks is an independent game studio making bright, bite-size games for phones, PCs and consoles. Easy to pick up, hard to put down, and always fun within a few clicks.",
+  "email": "admin@fewclicks.org",
+  "address": "",
+  "website": "https://fewclicks.org",
+  "founded": "2026",
+  "stats": [
+    { "label": "Games in the oven", "value": 6 },
+    { "label": "Clicks to fun", "value": 3 },
+    { "label": "Tutorials longer than a minute", "value": 0 }
+  ],
+  "values": [
+    {
+      "icon": "👆",
+      "title": "Tap and play",
+      "text": "No 40-minute tutorials. If it takes more than a few clicks to have fun, we redesign it."
+    },
+    {
+      "icon": "🍬",
+      "title": "Bite-size joy",
+      "text": "Short sessions, big smiles. Our games fit in a coffee break and still feel great after 100 hours."
+    },
+    {
+      "icon": "💜",
+      "title": "Made with heart",
+      "text": "A tiny team that sweats every bounce, pop and wobble so every click feels good."
+    }
+  ],
+  "socials": [
+    { "platform": "x", "label": "X / Twitter", "url": "" },
+    { "platform": "instagram", "label": "Instagram", "url": "" },
+    { "platform": "tiktok", "label": "TikTok", "url": "" },
+    { "platform": "youtube", "label": "YouTube", "url": "" },
+    { "platform": "discord", "label": "Discord", "url": "" }
+  ]
+}

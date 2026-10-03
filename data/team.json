@@ -1,0 +1,48 @@
+{
+  "members": [
+    {
+      "id": "player-one",
+      "name": "Player One",
+      "role": "Founder & Game Director",
+      "avatar": "assets/team/player-one.svg",
+      "color": "#ff5fa2",
+      "bio": "Has prototyped 200 games on napkins. Believes every game should be fun within three clicks.",
+      "funFact": "Can beat Rocket Tap with their eyes closed (allegedly).",
+      "stats": { "creativity": 95, "coffee": 80, "speed": 70 },
+      "links": []
+    },
+    {
+      "id": "pixel-pat",
+      "name": "Pixel Pat",
+      "role": "Art Director",
+      "avatar": "assets/team/pixel-pat.svg",
+      "color": "#7b5cff",
+      "bio": "Draws blobs, slimes and anything that wobbles. Responsible for 90% of the cuteness.",
+      "funFact": "Owns 47 sketchbooks. Has finished 3.",
+      "stats": { "creativity": 99, "coffee": 60, "speed": 75 },
+      "links": []
+    },
+    {
+      "id": "byte-bo",
+      "name": "Byte Bo",
+      "role": "Lead Developer",
+      "avatar": "assets/team/byte-bo.svg",
+      "color": "#2fd6a6",
+      "bio": "Turns napkin sketches into 60fps reality. Will optimise your toaster if you let them.",
+      "funFact": "Wrote a physics engine for fun. Twice.",
+      "stats": { "creativity": 80, "coffee": 99, "speed": 92 },
+      "links": []
+    },
+    {
+      "id": "melody-mo",
+      "name": "Melody Mo",
+      "role": "Sound & Music",
+      "avatar": "assets/team/melody-mo.svg",
+      "color": "#ffb020",
+      "bio": "Makes every pop, squish and boing sound delicious. Records sound effects with real jelly.",
+      "funFact": "The Slime Tower squish is actually a wet sponge and a banana.",
+      "stats": { "creativity": 90, "coffee": 70, "speed": 65 },
+      "links": []
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>FewClicks: games you can love in a few clicks</title>
+  <meta name="description" content="FewClicks is an independent game studio making bright, bite-size games for phones, PCs and consoles.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#fdf3ff">
+  <meta property="og:title" content="FewClicks game studio">
+  <meta property="og:description" content="Games you can love in a few clicks.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%23ff5fa2'/><path d='M40 30 L40 72 L50.5 62 L58 78 L65 75 L57.5 59 L72 59Z' fill='white'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="is-intro">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="loader" aria-hidden="true"><div class="loader-dots"><i style="--b:#ff5fa2"></i><i style="--b:#7b5cff"></i><i style="--b:#2fd6a6"></i></div></div>
+  <canvas id="bubble-canvas" aria-hidden="true"></canvas>
+
+  <header data-chrome="header"></header>
+
+  <main id="main">
+    <!-- ===== Hero / intro ===== -->
+    <section class="hero" id="top" aria-label="Welcome">
+      <div class="intro-ui">
+        <button class="intro-hit" type="button" aria-label="Pop the bubble to enter"></button>
+        <p class="intro-prompt" aria-hidden="true"><span class="hand">👆</span> Pop the bubble!</p>
+      </div>
+      <div class="hero-inner">
+        <h1 class="logo-type" aria-label="FewClicks"></h1>
+        <p class="tagline" data-tagline>Games you can love in a few clicks.</p>
+        <div class="cta">
+          <a class="btn btn--primary" href="games.html">🎮 Play our games</a>
+          <a class="btn" href="#studio">Meet the bubble crew</a>
+        </div>
+      </div>
+      <a class="scroll-hint" href="#games"><span aria-hidden="true">↓</span>float down</a>
+    </section>
+
+    <!-- ===== Featured games ===== -->
+    <section class="section" id="games" aria-labelledby="games-title">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">🫧 Fresh from the bubble machine</span>
+          <h2 class="section-title" id="games-title">Our <span class="wobble-word">games</span></h2>
+          <p class="section-lead">Squishy puzzles, one-tap arcade thrills and couch co-op chaos, all fun within a few clicks.</p>
+        </div>
+        <div class="games-grid" data-featured></div>
+        <div class="flavours reveal" data-flavours aria-label="Browse by category"></div>
+        <div class="center"><a class="btn btn--grape" href="games.html" data-all-games>See all games →</a></div>
+      </div>
+    </section>
+
+    <!-- ===== Studio + team ===== -->
+    <section class="section" id="studio" aria-labelledby="studio-title">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">💜 About the studio</span>
+          <h2 class="section-title" id="studio-title">Fun in a <span class="wobble-word">few clicks</span></h2>
+          <p class="section-lead" data-studio-desc></p>
+        </div>
+        <div class="about-grid" data-values></div>
+        <div class="stats reveal" data-stats></div>
+
+        <div class="section-head reveal" style="margin-top:96px">
+          <span class="eyebrow">👋 The team</span>
+          <h2 class="section-title">The bubble <span class="wobble-word">crew</span></h2>
+          <p class="section-lead">Tap a bubble to flip it and see their secret stats.</p>
+        </div>
+        <div class="team" data-team></div>
+      </div>
+    </section>
+
+    <!-- ===== News ===== -->
+    <section class="section" id="news" aria-labelledby="news-title">
+      <div class="container">
+        <div class="section-head reveal">
+          <span class="eyebrow">📰 Devlog &amp; news</span>
+          <h2 class="section-title" id="news-title">Fresh <span class="wobble-word">pops</span></h2>
+        </div>
+        <div class="news-grid" data-news></div>
+      </div>
+    </section>
+
+    <!-- ===== Contact ===== -->
+    <section class="section contact" id="contact" aria-labelledby="contact-title">
+      <div class="container contact">
+        <div class="contact-bubble reveal">
+          <div>
+            <h2 id="contact-title">Say hi! 👋</h2>
+            <p>Press, partnerships, bug reports or just bubble appreciation. We read everything.</p>
+            <a class="email-big" data-email href="mailto:admin@fewclicks.org">admin@fewclicks.org</a>
+            <div class="contact-actions">
+              <a class="btn btn--primary" data-email-btn href="mailto:admin@fewclicks.org">✉️ Send an email</a>
+              <button class="btn" type="button" data-copy>📋 Copy address</button>
+            </div>
+            <address class="address" data-address hidden></address>
+            <div class="socials" data-socials></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer data-chrome="footer"></footer>
+
+  <dialog class="modal" id="news-modal" aria-labelledby="news-modal-title">
+    <button class="icon-btn modal-close" type="button" aria-label="Close" data-close>✕</button>
+    <div class="modal-body" data-modal-body></div>
+  </dialog>
+
+  <button class="btn btn--sm skip-intro" type="button" data-skip-intro>Skip intro ⏭</button>
+
+  <script defer src="../vendor/gsap.min.js"></script>
+  <script type="module" src="js/home.js"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+{
+  "posts": [
+    {
+      "id": "new-website",
+      "title": "Welcome to the brand new FewClicks website!",
+      "date": "2026-10-01",
+      "tag": "Studio",
+      "gameId": "",
+      "image": "",
+      "summary": "We built a home on the web that's as playful as our games. Poke around, there are secrets hidden everywhere.",
+      "body": [
+        "Hello world! FewClicks finally has a proper home on the internet. Everything here is built to feel like our games: quick, bouncy and fun within a few clicks.",
+        "Keep an eye on this page for devlogs, launch news and the occasional blob-related emergency."
+      ],
+      "url": ""
+    },
+    {
+      "id": "blobby-pop-season-2",
+      "title": "Blobby Pop Season 2: Jelly Jungle is live",
+      "date": "2026-09-20",
+      "tag": "Update",
+      "gameId": "blobby-pop",
+      "image": "assets/games/blobby-pop/screenshot-2.svg",
+      "summary": "60 new levels, Vine Blobs that swing between columns, and a brand new Jungle Jelly Bomb.",
+      "body": [
+        "Season 2 takes the blobs into the Jelly Jungle! We've added 60 new levels, a new Vine Blob that swings between columns, and the Jungle Jelly Bomb, which clears an entire row with a very loud monkey noise.",
+        "Update your game from the App Store or Google Play to start swinging."
+      ],
+      "url": ""
+    },
+    {
+      "id": "devlog-3-clicks",
+      "title": "Devlog #3: How we design games you can learn in 3 clicks",
+      "date": "2026-08-28",
+      "tag": "Devlog",
+      "gameId": "",
+      "image": "",
+      "summary": "Our golden rule: if a new player can't have fun within three taps, it's back to the drawing board.",
+      "body": [
+        "Every FewClicks game goes through the Three Click Test. We hand a prototype to someone who has never seen it, say nothing, and count the taps until they smile.",
+        "If it takes more than three, we cut, simplify and try again. In this devlog we show the five versions of Rocket Tap that failed the test, and the one that passed."
+      ],
+      "url": ""
+    },
+    {
+      "id": "neon-drift-announce",
+      "title": "Neon Drift Club announced for PC and consoles",
+      "date": "2026-07-15",
+      "tag": "Announcement",
+      "gameId": "neon-drift-club",
+      "image": "assets/games/neon-drift-club/cover.svg",
+      "summary": "Our first arcade racer drifts onto Steam, PlayStation, Xbox and Switch this December. Wishlist now!",
+      "body": [
+        "Buckle up! Neon Drift Club is our biggest game yet: an arcade drift racer where every slide paints the city in light.",
+        "It launches this December on Steam, PlayStation, Xbox and Nintendo Switch. Wishlist it on Steam to get notified the moment the lights turn green."
+      ],
+      "url": ""
+    }
+  ]
+}

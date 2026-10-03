@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fewclicks.org/data/games.schema.json",
+  "title": "FewClicks games list",
+  "description": "Every game shown on fewclicks.org. Edit data/games.json to add, remove or change games.",
+  "type": "object",
+  "required": ["categories", "games"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "categories": {
+      "type": "array",
+      "description": "Categories used for filtering on the Games page.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Lowercase id used in games[].categories and in URLs." },
+          "name": { "type": "string", "description": "Label shown on the site." },
+          "icon": { "type": "string", "description": "An emoji shown next to the name." },
+          "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{3,8}$", "description": "Accent color for the category chip." }
+        },
+        "additionalProperties": false
+      }
+    },
+    "games": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/game" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "path": {
+      "type": "string",
+      "description": "Path relative to the site root (e.g. assets/games/my-game/cover.png) or a full https:// URL. Leave empty if not available."
+    },
+    "platform": {
+      "type": "string",
+      "enum": ["ios", "android", "steam", "switch", "playstation", "xbox", "web", "itch", "epic", "mac", "windows"]
+    },
+    "game": {
+      "type": "object",
+      "required": ["id", "title", "status", "categories", "platforms", "media", "description"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Unique slug. The game page URL is game.html?id=<id>." },
+        "title": { "type": "string" },
+        "tagline": { "type": "string", "description": "One short catchy line." },
+        "status": { "type": "string", "enum": ["released", "coming-soon", "in-development"] },
+        "featured": { "type": "boolean", "description": "Featured games appear on the home page." },
+        "order": { "type": "number", "description": "Lower numbers appear first." },
+        "categories": { "type": "array", "items": { "type": "string" }, "description": "Category ids from the categories list." },
+        "platforms": { "type": "array", "items": { "$ref": "#/$defs/platform" } },
+        "releaseDate": { "type": "string", "description": "YYYY-MM-DD (or YYYY-MM, or YYYY)." },
+        "price": { "type": "string", "description": "e.g. Free, $4.99, TBA" },
+        "ageRating": { "type": "string" },
+        "players": { "type": "string" },
+        "playTime": { "type": "string" },
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "theme": {
+          "type": "object",
+          "description": "Colors used to tint this game's page and cards.",
+          "properties": {
+            "primary": { "type": "string", "pattern": "^#[0-9a-fA-F]{3,8}$" },
+            "secondary": { "type": "string", "pattern": "^#[0-9a-fA-F]{3,8}$" }
+          },
+          "additionalProperties": false
+        },
+        "media": {
+          "type": "object",
+          "required": ["cover"],
+          "properties": {
+            "icon": { "$ref": "#/$defs/path", "description": "Square app icon (512×512 recommended)." },
+            "cover": { "$ref": "#/$defs/path", "description": "Main 16:9 artwork (1200×675 recommended)." },
+            "hero": { "$ref": "#/$defs/path", "description": "Optional wide banner for the game page. Falls back to cover." },
+            "screenshots": { "type": "array", "items": { "$ref": "#/$defs/path" }, "description": "Portrait or landscape images." },
+            "trailer": {
+              "type": "object",
+              "description": "type youtube: set id to the YouTube video id. type video: set src to an .mp4/.webm file. Leave id/src empty to show 'Trailer coming soon'.",
+              "properties": {
+                "type": { "type": "string", "enum": ["youtube", "video"] },
+                "id": { "type": "string" },
+                "src": { "$ref": "#/$defs/path" },
+                "poster": { "$ref": "#/$defs/path" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "description": {
+          "type": "object",
+          "required": ["short"],
+          "properties": {
+            "short": { "type": "string", "description": "1–2 sentences for cards." },
+            "long": { "type": "array", "items": { "type": "string" }, "description": "Paragraphs for the game page." }
+          },
+          "additionalProperties": false
+        },
+        "features": { "type": "array", "items": { "type": "string" } },
+        "stores": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["platform", "url"],
+            "properties": {
+              "platform": { "$ref": "#/$defs/platform" },
+              "url": { "type": "string", "description": "Store link. Use # while it is not live yet." },
+              "label": { "type": "string", "description": "Optional custom button text, e.g. 'Wishlist on Steam'." }
+            },
+            "additionalProperties": false
+          }
+        },
+        "reviews": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["quote"],
+            "properties": {
+              "source": { "type": "string" },
+              "author": { "type": "string" },
+              "quote": { "type": "string" },
+              "score": { "type": "number" },
+              "max": { "type": "number" },
+              "url": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "rating": {
+          "type": "object",
+          "description": "Average store rating. Use count 0 to hide.",
+          "properties": {
+            "average": { "type": "number", "minimum": 0, "maximum": 5 },
+            "count": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "seo": {
+          "type": "object",
+          "description": "Search engine and social sharing info for the game page.",
+          "properties": {
+            "title": { "type": "string" },
+            "description": { "type": "string" },
+            "keywords": { "type": "array", "items": { "type": "string" } },
+            "ogImage": { "$ref": "#/$defs/path", "description": "Social share image (PNG/JPG 1200×630 recommended)." }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

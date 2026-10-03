@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FewClicks Prototype Lab</title>
+  <meta name="description" content="Ten website concepts for FewClicks game studio. Pick your favourite!">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='44' fill='%23ff5fa2'/><path d='M38 28 L38 72 L49 61 L57 78 L64 75 L56 58 L71 58Z' fill='white'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0f0c22; --card: #1a1636; --ink: #f6f2ff; --muted: #a9a0cc; --line: rgba(255,255,255,.08);
+      --pink: #ff5fa2; --mint: #2fd6a6; --lemon: #ffd23f; --grape: #7b5cff;
+    }
+    :root[data-theme="light"] { --bg: #f7f4ff; --card: #fff; --ink: #1d1640; --muted: #6a6190; --line: rgba(29,22,64,.1); }
+    @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #f7f4ff; --card: #fff; --ink: #1d1640; --muted: #6a6190; --line: rgba(29,22,64,.1); } }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Fredoka', system-ui, sans-serif; background: var(--bg); color: var(--ink); min-height: 100vh; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 56px 16px 80px; }
+    header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 40px; }
+    .logo { display: inline-flex; align-items: center; gap: 12px; font-weight: 700; font-size: 20px; }
+    .logo svg { width: 40px; height: 40px; }
+    h1 { font-size: clamp(36px, 6vw, 64px); line-height: 1; margin: 16px 0 12px; letter-spacing: -1px; }
+    h1 span { background: linear-gradient(90deg, var(--pink), var(--lemon), var(--mint), var(--grape)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lead { color: var(--muted); font-size: 18px; max-width: 560px; margin: 0; line-height: 1.5; }
+    .progress { font-weight: 600; color: var(--muted); }
+    .progress b { color: var(--ink); font-size: 28px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; list-style: none; padding: 0; margin: 0; }
+    .card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 22px; min-height: 210px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s; }
+    .card::before { content: ''; position: absolute; width: 180px; height: 180px; right: -60px; top: -60px; border-radius: 50%; background: var(--c); opacity: .25; filter: blur(10px); transition: transform .4s; }
+    .card.live { cursor: pointer; }
+    .card.live:hover, .card.live:focus-within { transform: translateY(-6px) rotate(-.6deg); box-shadow: 0 20px 40px -20px var(--c); }
+    .card.live:hover::before { transform: scale(1.4); }
+    .num { font-size: 44px; font-weight: 700; line-height: 1; color: var(--c); }
+    .card h2 { margin: 0; font-size: 22px; }
+    .card p { margin: 0; color: var(--muted); line-height: 1.45; font-size: 15px; flex: 1; }
+    .chip { align-self: flex-start; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 999px; background: var(--line); color: var(--muted); }
+    .live .chip { background: var(--mint); color: #08392c; }
+    .next .chip { background: var(--lemon); color: #3d2f00; }
+    .card a { color: inherit; text-decoration: none; }
+    .card a::after { content: ''; position: absolute; inset: 0; }
+    .card a:focus-visible { outline: none; }
+    .card:focus-within { outline: 3px solid var(--c); outline-offset: 3px; }
+    .planned { opacity: .6; }
+    footer { margin-top: 48px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+    footer a { color: var(--ink); }
+    @media (prefers-reduced-motion: reduce) { .card, .card::before { transition: none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <div class="logo">
+          <svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="44" fill="#ff5fa2"/><circle cx="36" cy="34" r="12" fill="#fff" opacity=".35"/><path d="M38 28 L38 72 L49 61 L57 78 L64 75 L56 58 L71 58Z" fill="#fff"/></svg>
+          FewClicks
+        </div>
+        <h1>Prototype <span>Lab</span></h1>
+        <p class="lead">Ten totally different website concepts for the FewClicks game studio. Each one reads the same game data from <code>data/games.json</code>. Click a live prototype to play with it.</p>
+      </div>
+      <div class="progress" id="progress"></div>
+    </header>
+
+    <ul class="grid" id="grid"></ul>
+
+    <footer>
+      Prototypes use placeholder games, people and numbers. Contact: <a href="mailto:admin@fewclicks.org">admin@fewclicks.org</a>
+    </footer>
+  </div>
+
+  <script>
+    // status: 'live' | 'next' | 'planned'. Update as each prototype ships.
+    const PROTOTYPES = [
+      { n: 1, name: 'Bubble Pop Planet', status: 'live', color: '#ff5fa2', text: 'Glossy 3D candy bubbles. Pop the giant bubble to start, then pop everything else for points.' },
+      { n: 2, name: 'Physics Playground', status: 'next', color: '#ffd23f', text: 'The letters F-E-W-C-L-I-C-K-S fall with real physics. Grab, throw and stack the whole page.' },
+      { n: 3, name: 'Console Home Screen', status: 'planned', color: '#4cc9ff', text: 'Boot up a console dashboard you can drive with a keyboard or a real gamepad.' },
+      { n: 4, name: 'Few Clicks Challenge', status: 'planned', color: '#ffb020', text: 'The site is the game: a click counter, XP and achievements. Can you see it all in 5 clicks?' },
+      { n: 5, name: 'Sticker Scrapbook', status: 'planned', color: '#ff8a3d', text: 'A hand-drawn notebook with peelable stickers, taped polaroids and doodles.' },
+      { n: 6, name: 'Toy Island', status: 'planned', color: '#2fd6a6', text: 'A floating 3D island where buildings are the pages. Fly the camera between them.' },
+      { n: 7, name: 'Holo Trading Cards', status: 'planned', color: '#9b7bff', text: 'Rip open a booster pack. Games are shiny holographic cards that tilt and flip.' },
+      { n: 8, name: 'Playable Side-Scroller', status: 'planned', color: '#8bdc4a', text: 'Run, jump and bump "?" blocks to explore the studio as a tiny platformer.' },
+      { n: 9, name: 'Pixel Arcade Cabinet', status: 'planned', color: '#ff3d5a', text: 'INSERT COIN. CRT scanlines, chiptunes and a high-score table of games.' },
+      { n: 10, name: 'Cosmic Arcade', status: 'planned', color: '#22e4ff', text: 'Warp into space where every game is a planet orbiting the FewClicks sun.' },
+    ];
+    const label = { live: 'Live: play it', next: 'Up next', planned: 'Planned' };
+    document.getElementById('grid').innerHTML = PROTOTYPES.map((p) => `
+      <li class="card ${p.status}" style="--c:${p.color}">
+        <span class="num">${String(p.n).padStart(2, '0')}</span>
+        <h2>${p.status === 'live' ? `<a href="design/prototype${p.n}/">${p.name}</a>` : p.name}</h2>
+        <p>${p.text}</p>
+        <span class="chip">${label[p.status]}</span>
+      </li>`).join('');
+    const live = PROTOTYPES.filter((p) => p.status === 'live').length;
+    document.getElementById('progress').innerHTML = `<b>${live}</b> / ${PROTOTYPES.length} live`;
+  </script>
+</body>
+</html>

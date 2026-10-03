@@ -1,0 +1,339 @@
+{
+  "$schema": "./games.schema.json",
+  "categories": [
+    { "id": "puzzle", "name": "Puzzle", "icon": "🧩", "color": "#ff5fa2" },
+    { "id": "arcade", "name": "Arcade", "icon": "🕹️", "color": "#ff8a3d" },
+    { "id": "casual", "name": "Casual", "icon": "☕", "color": "#2fd6a6" },
+    { "id": "action", "name": "Action", "icon": "⚔️", "color": "#7b5cff" },
+    { "id": "party", "name": "Party", "icon": "🎉", "color": "#4cc9ff" },
+    { "id": "racing", "name": "Racing", "icon": "🏁", "color": "#ff3df2" }
+  ],
+  "games": [
+    {
+      "id": "blobby-pop",
+      "title": "Blobby Pop",
+      "tagline": "Match the blobs. Pop the blobs. Love the blobs.",
+      "status": "released",
+      "featured": true,
+      "order": 1,
+      "categories": ["puzzle", "casual"],
+      "platforms": ["ios", "android"],
+      "releaseDate": "2026-03-14",
+      "price": "Free",
+      "ageRating": "Everyone",
+      "players": "1",
+      "playTime": "2–5 min sessions",
+      "languages": ["English", "Spanish", "French", "German", "Japanese"],
+      "theme": { "primary": "#ff5fa2", "secondary": "#7b5cff" },
+      "media": {
+        "icon": "assets/games/blobby-pop/icon.svg",
+        "cover": "assets/games/blobby-pop/cover.svg",
+        "hero": "",
+        "screenshots": [
+          "assets/games/blobby-pop/screenshot-1.svg",
+          "assets/games/blobby-pop/screenshot-2.svg",
+          "assets/games/blobby-pop/screenshot-3.svg"
+        ],
+        "trailer": { "type": "youtube", "id": "", "src": "", "poster": "" }
+      },
+      "description": {
+        "short": "A squishy match-3 where every blob has feelings. Chain pops, trigger jelly bombs and clear 300+ wobbly levels.",
+        "long": [
+          "Blobby Pop is a match-3 puzzle game with a squishy twist: every blob wobbles, giggles and bounces when you touch it. Swipe to match three or more, chain reactions to fill the Jelly Meter, then unleash a giant Jelly Bomb.",
+          "Each world adds a new kind of blob, from sticky Gum Blobs to shy Ghost Blobs that only appear when you're not looking. Learn it in one tap, and master it over hundreds of levels."
+        ]
+      },
+      "features": [
+        "300+ handcrafted wobbly levels",
+        "Jelly Bombs and chain-reaction combos",
+        "Play offline, with no timers or energy walls",
+        "Weekly blob-tastic events"
+      ],
+      "stores": [
+        { "platform": "ios", "url": "#" },
+        { "platform": "android", "url": "#" }
+      ],
+      "reviews": [
+        { "source": "Player review", "author": "@jellyqueen", "quote": "I meant to play one level. It is now 2am. Send help (and more blobs).", "score": 5, "max": 5, "url": "" },
+        { "source": "The Tiny Joystick (placeholder)", "author": "", "quote": "The squishiest puzzle game on your phone. Every pop feels like bubble wrap for your brain.", "score": 9, "max": 10, "url": "" },
+        { "source": "Player review", "author": "@popmaster3000", "quote": "Ghost Blobs are pure evil and I love them.", "score": 4, "max": 5, "url": "" }
+      ],
+      "rating": { "average": 4.7, "count": 12840 },
+      "seo": {
+        "title": "Blobby Pop: the squishiest match-3 puzzle game",
+        "description": "Match, pop and wobble through 300+ levels in Blobby Pop, a free squishy puzzle game for iOS and Android by FewClicks.",
+        "keywords": ["match 3", "puzzle game", "mobile game", "casual game"],
+        "ogImage": "assets/games/blobby-pop/cover.svg"
+      }
+    },
+    {
+      "id": "rocket-tap",
+      "title": "Rocket Tap",
+      "tagline": "One tap. One rocket. Infinite space.",
+      "status": "released",
+      "featured": true,
+      "order": 2,
+      "categories": ["arcade"],
+      "platforms": ["ios", "android", "web"],
+      "releaseDate": "2026-06-02",
+      "price": "Free",
+      "ageRating": "Everyone",
+      "players": "1",
+      "playTime": "30 sec – 3 min runs",
+      "languages": ["English"],
+      "theme": { "primary": "#ff8a3d", "secondary": "#1d1b4f" },
+      "media": {
+        "icon": "assets/games/rocket-tap/icon.svg",
+        "cover": "assets/games/rocket-tap/cover.svg",
+        "hero": "",
+        "screenshots": [
+          "assets/games/rocket-tap/screenshot-1.svg",
+          "assets/games/rocket-tap/screenshot-2.svg",
+          "assets/games/rocket-tap/screenshot-3.svg"
+        ],
+        "trailer": { "type": "video", "id": "", "src": "assets/games/rocket-tap/trailer.webm", "poster": "assets/games/rocket-tap/cover.svg" }
+      },
+      "description": {
+        "short": "Tap to boost, release to drift. Thread your rocket through asteroid rings and chase the high score.",
+        "long": [
+          "Rocket Tap is a one-button arcade game built for the few seconds between everything else. Hold to boost, let go to glide, and slip through glowing rings while dodging asteroids.",
+          "Collect stardust to unlock 40+ ridiculous rockets, including a flying toaster, a disco ball and a very confused whale. Compete with friends on daily leaderboards."
+        ]
+      },
+      "features": [
+        "One-button controls anyone can learn instantly",
+        "40+ unlockable rockets",
+        "Daily challenge and global leaderboards",
+        "Playable right in your browser"
+      ],
+      "stores": [
+        { "platform": "ios", "url": "#" },
+        { "platform": "android", "url": "#" },
+        { "platform": "web", "url": "#" }
+      ],
+      "reviews": [
+        { "source": "Player review", "author": "@spacecadet", "quote": "Simple, fast and impossible to put down. The whale rocket is my son now.", "score": 5, "max": 5, "url": "" },
+        { "source": "Arcade Snacks (placeholder)", "author": "", "quote": "A perfect one-more-go game with buttery smooth controls.", "score": 4.5, "max": 5, "url": "" }
+      ],
+      "rating": { "average": 4.6, "count": 8421 },
+      "seo": {
+        "title": "Rocket Tap: one-tap space arcade game",
+        "description": "Boost, drift and dodge asteroids in Rocket Tap, a free one-button arcade game for iOS, Android and web by FewClicks.",
+        "keywords": ["one tap game", "arcade", "space game", "hyper casual"],
+        "ogImage": "assets/games/rocket-tap/cover.svg"
+      }
+    },
+    {
+      "id": "slime-tower",
+      "title": "Slime Tower",
+      "tagline": "Stack the slimes. Don't let them slide.",
+      "status": "released",
+      "featured": true,
+      "order": 3,
+      "categories": ["casual", "puzzle"],
+      "platforms": ["ios", "android"],
+      "releaseDate": "2025-11-20",
+      "price": "Free",
+      "ageRating": "Everyone",
+      "players": "1",
+      "playTime": "1–4 min sessions",
+      "languages": ["English", "Portuguese", "Korean"],
+      "theme": { "primary": "#2fd6a6", "secondary": "#1a8fa3" },
+      "media": {
+        "icon": "assets/games/slime-tower/icon.svg",
+        "cover": "assets/games/slime-tower/cover.svg",
+        "hero": "",
+        "screenshots": [
+          "assets/games/slime-tower/screenshot-1.svg",
+          "assets/games/slime-tower/screenshot-2.svg",
+          "assets/games/slime-tower/screenshot-3.svg"
+        ],
+        "trailer": { "type": "youtube", "id": "", "src": "", "poster": "" }
+      },
+      "description": {
+        "short": "A wobbly stacking game where gravity is your frenemy. Drop slimes, balance the tower and reach the clouds.",
+        "long": [
+          "Slime Tower is a physics stacking game with a gooey heart. Tap to drop a slime and watch it squish, wobble and (hopefully) settle on the tower below.",
+          "Different slimes behave differently: Sticky slimes grab their neighbours, Bouncy slimes have opinions, and Golden slimes are worth the risk."
+        ]
+      },
+      "features": [
+        "Squishy, real-time slime physics",
+        "12 slime types with unique behaviours",
+        "Build towers to the moon (literally)",
+        "Relaxing zen mode with no game over"
+      ],
+      "stores": [
+        { "platform": "ios", "url": "#" },
+        { "platform": "android", "url": "#" }
+      ],
+      "reviews": [
+        { "source": "Player review", "author": "@stackattack", "quote": "The most satisfying squish sound ever recorded.", "score": 5, "max": 5, "url": "" },
+        { "source": "Player review", "author": "@goo_enthusiast", "quote": "Zen mode is my new bedtime routine.", "score": 4, "max": 5, "url": "" }
+      ],
+      "rating": { "average": 4.5, "count": 5310 },
+      "seo": {
+        "title": "Slime Tower: squishy physics stacking game",
+        "description": "Stack wobbly slimes to the clouds in Slime Tower, a relaxing physics stacking game for iOS and Android by FewClicks.",
+        "keywords": ["stacking game", "physics game", "casual", "relaxing game"],
+        "ogImage": "assets/games/slime-tower/cover.svg"
+      }
+    },
+    {
+      "id": "dungeon-dice-dash",
+      "title": "Dungeon Dice Dash",
+      "tagline": "Roll the dice. Raid the dungeon. Run for your life.",
+      "status": "released",
+      "featured": true,
+      "order": 4,
+      "categories": ["action"],
+      "platforms": ["steam", "switch"],
+      "releaseDate": "2026-08-21",
+      "price": "$12.99",
+      "ageRating": "Teen",
+      "players": "1–2 (local co-op)",
+      "playTime": "20–40 min runs",
+      "languages": ["English", "French", "German", "Spanish", "Japanese", "Simplified Chinese"],
+      "theme": { "primary": "#7b5cff", "secondary": "#ffc83d" },
+      "media": {
+        "icon": "assets/games/dungeon-dice-dash/icon.svg",
+        "cover": "assets/games/dungeon-dice-dash/cover.svg",
+        "hero": "",
+        "screenshots": [
+          "assets/games/dungeon-dice-dash/screenshot-1.svg",
+          "assets/games/dungeon-dice-dash/screenshot-2.svg",
+          "assets/games/dungeon-dice-dash/screenshot-3.svg"
+        ],
+        "trailer": { "type": "youtube", "id": "", "src": "", "poster": "" }
+      },
+      "description": {
+        "short": "A fast roguelite where every attack is a dice roll. Build a cursed dice bag, dash through rooms and out-luck the dungeon.",
+        "long": [
+          "Dungeon Dice Dash is an action roguelite where your weapons are dice. Roll for attacks, dodges and spells, then customise your dice faces with runes found deep in the dungeon.",
+          "Every run reshuffles the rooms, the enemies and your luck. Team up with a friend in local co-op and argue about who rolled the ones."
+        ]
+      },
+      "features": [
+        "Dice-building meets real-time action",
+        "150+ runes to craft wild dice combos",
+        "Local co-op for two dungeon divers",
+        "Hand-drawn dungeons with a 90s cartoon vibe"
+      ],
+      "stores": [
+        { "platform": "steam", "url": "#" },
+        { "platform": "switch", "url": "#" }
+      ],
+      "reviews": [
+        { "source": "Couch Co-op Weekly (placeholder)", "author": "", "quote": "The best fight we've had over a dice roll since board game night. A co-op gem.", "score": 8.5, "max": 10, "url": "" },
+        { "source": "Player review", "author": "@critfail", "quote": "Rolled six ones in a row and still won. 10/10 would gamble again.", "score": 5, "max": 5, "url": "" }
+      ],
+      "rating": { "average": 4.8, "count": 2140 },
+      "seo": {
+        "title": "Dungeon Dice Dash: dice-building action roguelite",
+        "description": "Roll dice, build runes and raid dungeons in Dungeon Dice Dash, an action roguelite with local co-op for PC (Steam) and Nintendo Switch.",
+        "keywords": ["roguelite", "dice game", "co-op", "steam", "nintendo switch"],
+        "ogImage": "assets/games/dungeon-dice-dash/cover.svg"
+      }
+    },
+    {
+      "id": "paper-plane-party",
+      "title": "Paper Plane Party",
+      "tagline": "Fold. Fling. Fly with friends.",
+      "status": "in-development",
+      "featured": false,
+      "order": 5,
+      "categories": ["party", "casual"],
+      "platforms": ["ios", "android", "switch"],
+      "releaseDate": "2027-03-01",
+      "price": "TBA",
+      "ageRating": "Everyone",
+      "players": "1–8 (online & local)",
+      "playTime": "5 min rounds",
+      "languages": ["English"],
+      "theme": { "primary": "#4cc9ff", "secondary": "#ffd23f" },
+      "media": {
+        "icon": "assets/games/paper-plane-party/icon.svg",
+        "cover": "assets/games/paper-plane-party/cover.svg",
+        "hero": "",
+        "screenshots": [
+          "assets/games/paper-plane-party/screenshot-1.svg",
+          "assets/games/paper-plane-party/screenshot-2.svg"
+        ],
+        "trailer": { "type": "youtube", "id": "", "src": "", "poster": "" }
+      },
+      "description": {
+        "short": "A party game where you fold your own paper plane and race friends through a giant messy house.",
+        "long": [
+          "Paper Plane Party lets you fold, doodle and launch your own paper plane, then race up to 8 friends through kitchens, attics and the dreaded laundry room.",
+          "We're still folding this one. Follow our devlog for behind-the-scenes updates!"
+        ]
+      },
+      "features": [
+        "Design and doodle your own plane",
+        "Up to 8 players, online or on one couch",
+        "Crazy household race tracks"
+      ],
+      "stores": [],
+      "reviews": [],
+      "rating": { "average": 0, "count": 0 },
+      "seo": {
+        "title": "Paper Plane Party: multiplayer paper plane racing",
+        "description": "Fold, doodle and race paper planes with up to 8 friends. Paper Plane Party is in development at FewClicks.",
+        "keywords": ["party game", "multiplayer", "racing", "coming soon"],
+        "ogImage": "assets/games/paper-plane-party/cover.svg"
+      }
+    },
+    {
+      "id": "neon-drift-club",
+      "title": "Neon Drift Club",
+      "tagline": "Drift after dark. Light up the city.",
+      "status": "coming-soon",
+      "featured": true,
+      "order": 6,
+      "categories": ["racing", "arcade"],
+      "platforms": ["steam", "playstation", "xbox", "switch"],
+      "releaseDate": "2026-12-05",
+      "price": "$19.99",
+      "ageRating": "Everyone",
+      "players": "1–4 (split screen)",
+      "playTime": "3 min races",
+      "languages": ["English", "Japanese", "Korean", "French", "German", "Spanish"],
+      "theme": { "primary": "#ff3df2", "secondary": "#22e4ff" },
+      "media": {
+        "icon": "assets/games/neon-drift-club/icon.svg",
+        "cover": "assets/games/neon-drift-club/cover.svg",
+        "hero": "",
+        "screenshots": [
+          "assets/games/neon-drift-club/screenshot-1.svg",
+          "assets/games/neon-drift-club/screenshot-2.svg",
+          "assets/games/neon-drift-club/screenshot-3.svg"
+        ],
+        "trailer": { "type": "youtube", "id": "", "src": "", "poster": "" }
+      },
+      "description": {
+        "short": "An arcade drift racer where your tyres paint the city in neon. Drift long, glow bright, win the night.",
+        "long": [
+          "Neon Drift Club is a pick-up-and-play arcade racer. Every drift leaves a trail of light, and the longer you slide, the more of the city you paint.",
+          "Race friends in 4-player split screen, customise your ride with glowing decals and climb the club rankings from Rookie to Neon Legend."
+        ]
+      },
+      "features": [
+        "Drift to paint the city with light",
+        "4-player split-screen races",
+        "Synthwave soundtrack with 30+ tracks",
+        "Easy to drive, wild to master"
+      ],
+      "stores": [
+        { "platform": "steam", "url": "#", "label": "Wishlist on Steam" }
+      ],
+      "reviews": [],
+      "rating": { "average": 0, "count": 0 },
+      "seo": {
+        "title": "Neon Drift Club: arcade drift racing (coming soon)",
+        "description": "Drift after dark and paint the city in neon. Neon Drift Club is coming to PC, PlayStation, Xbox and Switch.",
+        "keywords": ["racing game", "drift", "arcade racer", "split screen"],
+        "ogImage": "assets/games/neon-drift-club/cover.svg"
+      }
+    }
+  ]
+}
