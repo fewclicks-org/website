@@ -178,7 +178,9 @@ function normalize(b) {
   b.links = b.links || [];
   b.world = b.world || { wind: 0 };
   // the sun is a draggable item: higher = brighter, none = night
-  if (!b.items.some((i) => i.type === 'sun') && !b.world.night) b.items.push(makeItem('sun', CENTER.x, 330, {}, { s: 1.4, z: 0 }));
+  if (!b.items.some((i) => i.type === 'sun') && !b.world.night) b.items.push(makeItem('sun', CENTER.x, -600, {}, { s: 1, z: 0 }));
+  // sky scale: clouds float 25+ m up (older boards had them low)
+  b.items.forEach((i) => { if (i.type === 'cloud' && i.y > GROUND_Y - 3600) { i.y = GROUND_Y - 4300; i.s = 1; } if (i.type === 'sun' && i.s > 1) i.s = 1; });
   // old potted plants are planted in the ground now
   b.flora = b.flora || [];
   b.items = b.items.filter((i) => { if (i.type !== 'plant') return true; b.flora.push([{ cactus: 'palm', flower: 'tulip' }[i.d?.species] || 'sunflower', Math.round(i.x), Math.max(0.1, i.d?.growth || 0.3), Math.random(), 0]); return false; });
@@ -268,6 +270,7 @@ function mountAll() {
   [...board.items].sort((a, b) => a.z - b.z).forEach(mountItem);
   // rooted things stand on the ground (sizes can change: true scale, re-traced outlines)
   board.items.filter((i) => ROOTED.has(i.type)).forEach(rootItem);
+  syncGround(true); // ground under every item exists before anything starts falling
   board.links = (board.links || []).filter((l) => byId(l.a) && byId(l.b));
   board.links.forEach((l) => physics.addLink(l));
   select(null);
@@ -976,7 +979,7 @@ async function takeSnapshot() {
 const POND_SVG = '<svg viewBox="0 0 100 60"><path d="M2 22 Q50 70 98 22" fill="#c1694f"/><path d="M14 30 Q50 58 86 30Z" fill="#55acee"/><path d="M26 34 Q50 48 74 34" fill="none" stroke="#bbddf5" stroke-width="3" stroke-linecap="round"/></svg>';
 const GALLERY = {
   Elements: [
-    { name: 'Sun', svg: OBJECTS.sun, type: 'sun', d: {}, x: { s: 1.4 } },
+    { name: 'Sun', svg: OBJECTS.sun, type: 'sun', d: {} },
     { name: 'Lamp', svg: OBJECTS.lamp, type: 'lamp', d: { temp: 'warm' } },
     { name: 'Torch', svg: OBJECTS.torch, type: 'torch', d: { beam: 0.42 }, x: { a: 0.3 } },
     { name: 'Rain cloud', svg: cloudSvg('rain'), type: 'cloud', d: { mode: 'rain', amount: 0.6 }, x: { s: 1 } },
@@ -989,9 +992,9 @@ const GALLERY = {
   Water: [
     { name: 'Watering can', svg: canSvg(), type: '$can', tip: 'Drag the can over your plants: it pours while you hold it.' },
     { name: 'Dig a pond', svg: POND_SVG, type: '$pond' },
-    { name: 'Hand-pump bore', svg: boreSvg('hand'), type: 'bore', d: { pump: 'hand', depth: 400 } },
-    { name: 'Windmill bore', svg: boreSvg('wind'), type: 'bore', d: { pump: 'wind', depth: 400 } },
-    { name: 'Solar bore', svg: boreSvg('solar'), type: 'bore', d: { pump: 'solar', depth: 400 } },
+    { name: 'Hand-pump bore', svg: boreSvg('hand'), type: 'bore', d: { pump: 'hand', depth: 1200 } },
+    { name: 'Windmill bore', svg: boreSvg('wind'), type: 'bore', d: { pump: 'wind', depth: 1200 } },
+    { name: 'Solar bore', svg: boreSvg('solar'), type: 'bore', d: { pump: 'solar', depth: 1200 } },
     { name: 'Water tank', svg: tankSvg(), type: 'tank', d: { level: 0 } },
     { name: 'Tap', svg: tapSvg(), type: 'tap', d: { on: false } },
     { name: 'Sprinkler', svg: sprinklerSvg(), type: 'sprinkler', d: { on: true } },
@@ -1044,7 +1047,7 @@ function placeEntry(e, at) {
   if (e.type === '$can') { toast(e.tip, 2600); return; }
   if (e.type === '$volcano') { volcano.build(p.x); sfx.boing?.(); toast(e.tip, 3600); commit(); return; }
   if (e.type === 'sun' && board.items.some((i) => i.type === 'sun')) { const s0 = board.items.find((i) => i.type === 'sun'); physics.moveTo(s0.id, p.x, Math.min(groundAt(p.x, 200), p.y)); select(s0.id); toast('There is only one sun: moved it here. Higher = brighter.'); commit(); return; }
-  const y = Math.min(groundAt(p.x, 120), p.y);
+  const y = e.type === 'cloud' ? Math.min(p.y, GROUND_Y - 3600) : Math.min(groundAt(p.x, 120), p.y);
   addItem(makeItem(e.type, p.x + (at ? 0 : (Math.random() - 0.5) * 160), y, d, { ...(e.x || {}) }), { edit: !!e.edit, inspect: !!e.inspect });
   if (e.tip) toast(e.tip, 3200);
   if (PIPE_TYPES.has(e.type)) toast('Right-click → Connect → Pipe to… to join it to a bore, tank, tap or sprinkler.', 3600);
@@ -1410,7 +1413,7 @@ function plantAt(x, sp) {
   const def = SPECIES[sp];
   if (!def) return;
   if (def.aquatic ? water.depthAt(x) < 10 : water.depthAt(x) > 6) { toast(def.aquatic ? `${def.name} needs a pond: plant it in water.` : 'Too wet here: plant on dry ground.', 2000); return; }
-  if (terrain.matAt(x) === 'rock') { toast('Nothing grows on rock.', 1600); return; }
+  if (terrain.matAt(x) === 'rock' || terrain.matAt(x) === 'cement') { toast(`Nothing grows on ${terrain.matAt(x)}.`, 1600); return; }
   flora.add(sp, x, { g: 0 });
   sfx.pop(0.8);
   if (!plantTipShown) { plantTipShown = true; toast(`${def.name} planted! Water it to make it grow: drag the watering can (Water list) over it.`, 3600); }
@@ -1463,7 +1466,7 @@ function drawShovelRing() {
 }
 function buildShovelBar() {
   const bar = $('[data-shovelbar]');
-  const modes = [['raise', '⬆', 'Raise ground'], ['lower', '⬇', 'Dig / lower'], ['smooth', '≈', 'Smooth'], ['flatten', '▬', 'Flatten to start height'], ['|'], ['grass', '🌱', 'Grass'], ['dirt', '🟫', 'Bare dirt'], ['sand', '🏖', 'Sand (drains fast)'], ['clay', '🧱', 'Clay (holds water)'], ['rock', '🪨', 'Rock (can’t dig)']];
+  const modes = [['raise', '⬆', 'Raise ground'], ['lower', '⬇', 'Dig / lower'], ['smooth', '≈', 'Smooth'], ['flatten', '▬', 'Flatten to start height'], ['|'], ['grass', '🌱', 'Grass'], ['dirt', '🟫', 'Bare dirt'], ['sand', '🏖', 'Sand (drains fast)'], ['clay', '🧱', 'Clay (holds water)'], ['rock', '🪨', 'Rock (can’t dig)'], ['cement', '⬜', 'Cement (water stays on top)']];
   bar.innerHTML = `<div class="pb-g">${modes.map(([m, ic, l]) => (m === '|' ? '<i class="sep"></i>' : `<button type="button" data-sm="${m}" title="${l}" aria-label="${l}" class="emo">${ic}</button>`)).join('')}</div><i class="sep"></i><div class="pb-g">${[[90, 'S'], [180, 'M'], [360, 'L']].map(([s, l]) => `<button type="button" data-ss="${s}" aria-label="Brush ${l}" class="sz"><i style="--s:${s / 18}px"></i></button>`).join('')}</div>`;
   const paint = () => {
     bar.querySelectorAll('[data-sm]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.sm === shovel.mode)));

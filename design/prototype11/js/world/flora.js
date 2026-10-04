@@ -83,8 +83,15 @@ export function createFlora({ terrain, water, spawn }) {
     return sp.h * ((isTree(sp) ? 0.14 : 0.42) + (isTree(sp) ? 0.86 : 0.58) * clamp((g - STAGES[0]) / (1 - STAGES[0]), 0, 1));
   }
   function size(p) { return clamp(p.g, 0.05, 1); }
+  /** Flowers: a real-size head (Twemoji sprite) on a drawn stem. Returns the sprite box size, or 0. */
+  function headSize(p) {
+    const sp = SPECIES[p.sp];
+    if (!sp.head || p.gv < STAGES[0]) return 0;
+    return Math.max(6, sp.head * 1.6 * (height(p) / sp.h));
+  }
   function bbox(p) {
-    const h = height(p), w = h * (p.gv < STAGES[0] ? 0.9 : 0.86);
+    const hs = headSize(p);
+    const h = height(p), w = hs ? Math.max(16, hs) : h * (p.gv < STAGES[0] ? 0.9 : 0.86);
     const y = baseY(p);
     return { x0: p.x - w / 2, x1: p.x + w / 2, y0: y - h, y1: y + 6, h, w };
   }
@@ -202,10 +209,36 @@ export function createFlora({ terrain, water, spawn }) {
       let ang = (wind * 0.025 + Math.sin(t * (1.2 + p.seed) + p.seed * 20) * 0.018 * (0.6 + Math.abs(wind) * 0.5)) * flex;
       if (sp.followsSun && c.sunWX != null && !sprout) ang += clamp((c.sunWX - p.x) / 2000, -0.12, 0.12);
       const pop = 1 + Math.sin(p.pop * Math.PI) * 0.12;
-      const w = H * pop, h = H * pop;
+      const hs = headSize(p) * pop;
+      const w = hs || H * pop, h = H * pop;
       ctx.save();
       ctx.translate(p.x, by);
       ctx.rotate(ang);
+      if (hs) {
+        if (sp.aquatic) {
+          // lotus: floats on the water, no stem
+          ctx.drawImage(pic, -hs / 2, -hs * 0.75, hs, hs);
+          ctx.restore();
+          continue;
+        }
+        // flower: green stem with two leaves, real-size head on top
+        const k = H / sp.h, bend = Math.sin(t * (1.1 + p.seed) + p.seed * 9) * 0.04 * h;
+        const sw = Math.max(1.1, sp.head * 0.1 * k);
+        ctx.strokeStyle = p.burnt > 0.5 ? '#3a3a3a' : season === 3 ? '#7c8a5c' : '#4a8a2a';
+        ctx.lineWidth = sw; ctx.lineCap = 'round';
+        const topY = -h + hs * 0.72;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(bend, topY * 0.5, 0, topY); ctx.stroke();
+        ctx.fillStyle = ctx.strokeStyle;
+        for (const [f, side] of [[0.3, -1], [0.55, 1]]) {
+          const ly = topY * f, ll = Math.max(3, sp.head * 0.45 * k);
+          ctx.beginPath(); ctx.ellipse(side * ll * 0.55 + bend * f, ly - ll * 0.15, ll * 0.6, ll * 0.22, side * -0.6, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.drawImage(pic, -hs / 2, -h, hs, hs);
+        if (p.burnt <= 0.5) drawExtras(ctx, p, sp, season, hs, h - (h - hs) * 0);
+        if (p.burning) { ctx.fillStyle = 'rgba(255,120,30,.22)'; ctx.beginPath(); ctx.ellipse(0, -h * 0.5, hs, h * 0.5, 0, 0, Math.PI * 2); ctx.fill(); }
+        ctx.restore();
+        continue;
+      }
       // soft contact shadow
       ctx.fillStyle = 'rgba(0,0,0,.10)';
       ctx.beginPath(); ctx.ellipse(0, -1, w * (isTree(sp) ? 0.22 : 0.18), Math.max(2, w * 0.03), 0, 0, Math.PI * 2); ctx.fill();

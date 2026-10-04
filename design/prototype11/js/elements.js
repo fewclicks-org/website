@@ -5,7 +5,8 @@
 
 import { PAPER_TYPES, METAL_TYPES, FLOATERS } from './items.js';
 
-const MAX_PARTICLES = 1400;
+const MAX_PARTICLES = 1800;
+const MAX_RUNS = 220, MAX_DRIPS = 220; // rivulets/drips beyond this merge into existing ones (more water each)
 const rot = (x, y, a) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
 
 export function createElements({ physics, lights, camera, canvas, els, sizes, getItems, getLinks, api, water, atmos }) {
@@ -26,6 +27,9 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
   const world = { get wind() { return atmos.wind; }, set wind(v) { atmos.setMode(v ? 'manual' : 'auto', v); } };
   const P = []; // particles
   const bolts = [];
+  let frameNo = 0;
+  const counts = { run: 0, drip: 0 }; // live rivulets / drips (recounted every frame)
+  const lastRun = new Map(); // item id → newest rivulet on it
   const state = new Map(); // per-item runtime state (not saved): next strike, spray timer, spin velocity
   const st = (id) => { let s = state.get(id); if (!s) state.set(id, (s = {})); return s; };
   let changed = false;
@@ -162,9 +166,17 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     return best;
   }
 
+  function stormTick(c, s, now) {
+    if (!s.next) s.next = now + 4000 + Math.random() * 6000;
+    if (now >= s.next) { s.next = now + 6000 + Math.random() * 9000; strike(c); }
+  }
   function strike(cloud) {
     const { w, h } = dims(cloud);
-    strikeAt(cloud.x + (Math.random() - 0.5) * w * 0.4, cloud.y + h * 0.35, cloud.id);
+    // strike somewhere under the cloud, preferably where you can see it
+    const v = camera.viewRect();
+    const x0 = Math.max(cloud.x - w * 0.3, v.x + v.w * 0.1), x1 = Math.min(cloud.x + w * 0.3, v.x + v.w * 0.9);
+    const x = x1 > x0 ? x0 + Math.random() * (x1 - x0) : cloud.x + (Math.random() - 0.5) * w * 0.4;
+    strikeAt(x, cloud.y + h * 0.3, cloud.id);
   }
   /** A jagged random-walk path from (x0, y0) to (x1, y1). */
   function zigzag(x0, y0, x1, y1, seg = 36, jit = 46) {
@@ -198,7 +210,8 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
   /** The bolt reached the ground / item: flash, thunder (delayed by distance), sparks, damage. */
   function impact(b) {
     const { hit, x0 } = b;
-    lights.strike(x0, (b.y0 + hit.y) / 2, 1, Math.max(700, (hit.y - b.y0) * 0.9));
+    lights.strike(x0, hit.y - 200, 1, 1000); // local: the ground around the strike
+    lights.strike(x0, b.y0 + 300, 0.6, 800); // and the cloud base
     const v = camera.viewRect?.();
     const dist = v ? Math.hypot(x0 - (v.x + v.w / 2), hit.y - (v.y + v.h / 2)) : 0;
     setTimeout(() => api.sfx.thunder(), Math.min(3000, (dist / 34300) * 1000)); // sound: 343 m/s, 1 m = 100 px
@@ -229,6 +242,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
 
   // ---------------- per frame ----------------
   function update(dt, now) {
+    frameNo++;
     const t60 = Math.min(3, dt / 16.667);
     const items = getItems();
     const view = camera.viewRect();
@@ -239,18 +253,32 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       const s = st(c.id);
       const mode = c.d.mode || 'rain';
       if (world.wind && physics.dragId !== c.id) physics.moveTo(c.id, c.x + world.wind * 0.6 * t60, c.y);
-      if (!near(c, view, 900) || mode === 'none') continue;
+      if (mode === 'none') continue;
       const { w, h } = dims(c);
+      // sky-scale clouds are huge: only the part above the view rains (keeps the cost bounded)
+      const rx0 = Math.max(c.x - w * 0.38, view.x - 300), rx1 = Math.min(c.x + w * 0.38, view.x + view.w + 300);
+      const base = c.y + h * 0.3;
+      // where nobody is looking, rain still falls: water goes straight to the ground (no drops drawn)
+      if (mode !== 'snow' && (frameNo % 10) === 0) {
+        const perPx = (c.d.amount ?? 0.6) * (mode === 'storm' ? 5 : 3) * 0.3 / 260 * 10 * t60;
+        for (let x = c.x - w * 0.38; x < c.x + w * 0.38; x += 64) {
+          if (x + 64 > rx0 && x < rx1 && base <= view.y + view.h + 200) continue;
+          water.add(x + 32, perPx * 64, 64);
+          if (Math.random() < 0.06) api.douse?.(x + 32, 0);
+        }
+      }
+      if (rx1 <= rx0 || base > view.y + view.h + 200) { if (mode === 'storm') stormTick(c, s, now); continue; }
+      const vw = rx1 - rx0;
+      const top = Math.max(base, view.y - 600); // drops start at the cloud base, or just above the view
       const amount = c.d.amount ?? 0.6;
       if (mode === 'snow') {
-        if (Math.random() < amount * 1.6 * t60 * (w / 260)) add({ k: 'snow', x: c.x + (Math.random() - 0.5) * w * 0.8, y: c.y + h * 0.3, vx: 0, vy: 1.4 + Math.random(), life: 900, ph: Math.random() * 6, src: c.id });
+        if (Math.random() < amount * 1.6 * t60 * (vw / 260)) add({ k: 'snow', x: rx0 + Math.random() * vw, y: top, vx: 0, vy: 1.4 + Math.random(), life: 2400, ph: Math.random() * 6, src: c.id });
       } else {
-        const n = amount * (mode === 'storm' ? 5 : 3) * t60 * (w / 260);
-        for (let i = 0; i < n || Math.random() < n - i; i++) add({ k: 'rain', x: c.x + (Math.random() - 0.5) * w * 0.76, y: c.y + h * 0.3, vx: world.wind * 3, vy: 9 + Math.random() * 3, life: 400, src: c.id });
-        if (mode === 'storm') {
-          if (!s.next) s.next = now + 4000 + Math.random() * 6000;
-          if (now >= s.next) { s.next = now + 6000 + Math.random() * 9000; strike(c); }
-        }
+        // rainfall per metre is fixed; when many drops would be needed, fewer drops each carry more water
+        const want = amount * (mode === 'storm' ? 5 : 3) * t60 * (vw / 260);
+        const n = Math.min(14, want), vol = 0.3 * (want / Math.max(n, 0.001));
+        for (let i = 0; i < n || Math.random() < n - i; i++) add({ k: 'rain', x: rx0 + Math.random() * vw, y: top + Math.random() * 40, vx: world.wind * 3, vy: 12 + Math.random() * 6, life: 600, src: c.id, vol });
+        if (mode === 'storm') stormTick(c, s, now);
       }
     }
 
@@ -383,6 +411,8 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       if (ws != null) for (let i = 0; i < 3; i++) add({ k: 'drip', x, y: ws - 2, vx: world.wind * (1.5 + Math.random()), vy: -1.5 - Math.random() * 2, life: 120 });
     }
     // move particles + collisions (rain & snow are blocked by items)
+    counts.run = 0; counts.drip = 0;
+    for (const q of P) { if (q.k === 'run') counts.run++; else if (q.k === 'drip') counts.drip++; }
     if (P.length) {
       const solids = [];
       const skipIds = new Set(of('cloud').map((c) => c.id));
@@ -429,7 +459,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
           const ws = water.surfaceAt(p.x, 1.5);
           if (ws != null && p.y >= ws) {
             if (p.k === 'snow') { if (water.iceAt(p.x) < 1) water.add(p.x, 0.04); }
-            else if (p.k !== 'foam') { water.add(p.x, 0.08); if (Math.random() < 0.35) splash(p.x, ws, 1, 'rgba(160,210,255,.9)'); ripple(p.x, ws); }
+            else if (p.k !== 'foam') { water.add(p.x, 0.08 * (p.vol || 0.3) / 0.3); if (Math.random() < 0.35) splash(p.x, ws, 1, 'rgba(160,210,255,.9)'); ripple(p.x, ws); }
             P.splice(i, 1); continue;
           }
           const hit = Query.point(solidBodies, { x: p.x, y: p.y })[0];
@@ -442,7 +472,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
               if (startRun(p, rec)) { P.splice(i, 1); continue; }
             }
             if (p.k === 'rain' || p.k === 'drip') {
-              if (!rec) { water.add(p.x, 0.3); if (Math.random() < 0.5) splash(p.x, gy, 2); }
+              if (!rec) { water.add(p.x, p.vol || 0.3); if (Math.random() < 0.5) splash(p.x, gy, 2); }
               else splash(p.x, p.y, 1);
             }
             if (p.k === 'snow' && !rec) groundSnow(p.x);
@@ -466,7 +496,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       const t0 = b.t;
       b.t += t60;
       if (t0 < GROW && b.t >= GROW) impact(b);
-      if (t0 < GROW + 9 && b.t >= GROW + 9) lights.strike(b.x0, (b.y0 + b.hit.y) / 2, 0.7, 700); // re-strike
+      if (t0 < GROW + 9 && b.t >= GROW + 9) lights.strike(b.x0, b.hit.y - 200, 0.7, 900); // re-strike
       if (b.t > GROW + 26) bolts.splice(i, 1);
     }
     return changed;
@@ -507,7 +537,15 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     // dir +1 = move from vertex a to b, -1 = from b to a; always downhill
     let dir = b.y >= a.y ? 1 : -1;
     if (Math.abs(b.y - a.y) < 0.5) dir = Math.random() < 0.5 ? -1 : 1;
-    add({ k: 'run', id: rec.item.id, pi, i: e.i, u: e.t, dir, sp: 0.6 + Math.random() * 0.6, life: 400, x: p.x, y: e.ey });
+    if (counts.run >= MAX_RUNS) {
+      // too many rivulets: this drop joins one already running on the same item
+      const r = lastRun.get(rec.item.id);
+      if (r && P.includes(r)) { r.vol = (r.vol || 0.3) + (p.vol || 0.3); return true; }
+    }
+    const r = { k: 'run', id: rec.item.id, pi, i: e.i, u: e.t, dir, sp: 0.6 + Math.random() * 0.6, life: 400, x: p.x, y: e.ey, vol: p.vol };
+    add(r);
+    lastRun.set(rec.item.id, r);
+    counts.run++;
     rec.item.d.wet = Math.min(1, (rec.item.d.wet || 0) + 0.02);
     if (Math.random() < 0.1) api.patch(rec.item);
     return true;
@@ -528,7 +566,9 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       if (edgeNormalUp(part, ni) < -0.25) { p.i = ni; p.u = p.dir > 0 ? 0 : 1; a = v[ni]; b = v[(ni + 1) % n]; }
       else {
         const cx = p.dir > 0 ? b.x : a.x, cy = p.dir > 0 ? b.y : a.y;
-        add({ k: 'drip', x: cx + (cx > part.position.x ? 2 : -2), y: cy + 2, vx: (cx > part.position.x ? 1 : -1) * 0.8 + rec.body.velocity.x, vy: 1, life: 300 });
+        if (counts.drip >= MAX_DRIPS) { water.add(cx, p.vol || 0.3); return true; } // budget: the water reaches the ground below at once
+        counts.drip++;
+        add({ k: 'drip', vol: p.vol, x: cx + (cx > part.position.x ? 2 : -2), y: cy + 2, vx: (cx > part.position.x ? 1 : -1) * 0.8 + rec.body.velocity.x, vy: 1, life: 300 });
         return true;
       }
     }

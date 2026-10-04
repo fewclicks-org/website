@@ -344,6 +344,17 @@ export function createPhysics({ terrain, reduced = false, shapeOf = null }) {
     const n = reduced ? 1 : Math.max(1, Math.min(3, Math.round(dt / 16.667)));
     for (let i = 0; i < n; i++) Engine.update(engine, 16.667);
     let moved = false;
+    // safety: anything that ended up inside the ground (tunnelled, or spawned before its ground chunk existed)
+    // is lifted back onto the surface
+    map.forEach(({ body }) => {
+      if (body.isStatic || body.isSleeping || body.isSensor) return;
+      const sy = terrain.surfaceY(body.position.x);
+      if (body.position.y > sy + 2) {
+        const hh = (body.bounds.max.y - body.bounds.min.y) / 2;
+        Body.setPosition(body, { x: body.position.x, y: sy - hh - 1 });
+        Body.setVelocity(body, { x: body.velocity.x * 0.5, y: 0 });
+      }
+    });
     map.forEach(({ item, body }) => {
       if (!body.isSleeping || drag?.rec.body === body) {
         const bc = boxCentre(body);

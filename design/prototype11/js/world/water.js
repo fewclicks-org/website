@@ -5,11 +5,11 @@
 //  • evaporation (sun + heat), freezing into ice below 0°C (solid + slippery), melting above
 // Everything is sparse, so an infinite world costs nothing where it is dry.
 
-import { COL, BEDROCK } from './terrain.js';
+import { COL, BEDROCK, AQUIFER, MATS } from './terrain.js';
 
 const CAP = 70; // px of water one column of soil can hold before it is saturated
-const INFIL = [0.03, 0.12, 0.006, 0, 0.04]; // by material: grass, sand, clay, rock, dirt (px per tick at dry soil)
-const GW_DEFAULT = 260; // groundwater table: px below the base ground line
+const INFIL = [0.03, 0.12, 0.006, 0, 0.04, 0]; // by material: grass, sand, clay, rock, dirt, cement (px per tick at dry soil)
+const GW_DEFAULT = 800; // 8 m // groundwater table: px below the base ground line
 const CHUNK_COLS = 64;
 
 export function createWater({ terrain }) {
@@ -24,7 +24,7 @@ export function createWater({ terrain }) {
   let onAdd = null; // plants drink water that reaches the ground
   const G = terrain.groundY;
   const th = (c) => terrain.heightAtCol(c);
-  const matIdx = (c) => ({ grass: 0, sand: 1, clay: 2, rock: 3, dirt: 4 })[terrain.matAt(c * COL + 1)];
+  const matIdx = (c) => MATS[terrain.matAt(c * COL + 1)] ?? 0;
   const col = (x) => Math.floor(x / COL);
 
   // the terrain treats thick ice as solid ground (flush with the water surface)
@@ -118,7 +118,7 @@ export function createWater({ terrain }) {
         let nm = mo + inf / CAP;
         if (nm > 1) { recharge(cc, (nm - 1) * CAP); nm = 1; }
         // evaporation
-        const evap = Math.min(nd - ice, 0.0012 * (0.3 + sun) * Math.max(0.2, 1 + temp / 25) * timeK);
+        const evap = Math.min(nd - ice, 0.00012 * (0.3 + sun) * Math.max(0.2, 1 + temp / 25) * timeK);
         nd -= Math.max(0, evap);
         MO.set(cc, nm);
         setDepth(cc, nd);
@@ -134,9 +134,13 @@ export function createWater({ terrain }) {
         for (const [k, d] of GW) {
           const nd = d + (GW_DEFAULT - d) * 0.0008 * timeK;
           if (Math.abs(nd - GW_DEFAULT) < 1) GW.delete(k); else GW.set(k, nd);
-          // a table above the surface seeps out as a spring
-          for (let cc = k * CHUNK_COLS; cc < (k + 1) * CHUNK_COLS; cc += 4) if (-nd > th(cc) - 6) setDepth(cc, depth(cc) + 0.05);
         }
+        // ground dug below the water table (or a table risen above the surface) seeps groundwater in,
+        // until the water in the hole reaches the table
+        terrain.forEachCol?.((cc, hgt) => {
+          const gw = gwDepth(Math.floor(cc / CHUNK_COLS));
+          if (-hgt - depth(cc) > gw + 4) setDepth(cc, depth(cc) + 0.6 * timeK);
+        });
       }
     }
     version++;
@@ -164,6 +168,8 @@ export function createWater({ terrain }) {
           const ia = ICE.get(a) || 0, ib = ICE.get(b) || 0;
           const ha = th(a) + da, hb = th(b) + db;
           let q = (ha - hb) * 0.24;
+          // surface tension: a thin film (< 0.4 px) clings to the ground instead of running off
+          if (q > 0 && da - ia < 0.4) q = 0; else if (q < 0 && db - ib < 0.4) q = 0;
           // wind drags the surface: water piles up on the downwind shore
           const wv = windAt(b * COL, G - th(b) - db);
           if (wv) q += wv * 0.012 * Math.min(1, (da + db) / 24);
@@ -190,8 +196,9 @@ export function createWater({ terrain }) {
       const m = moisture(c);
       const sy = G - th(c);
       if (sy > bottom || m < 0.05) continue;
-      ctx.fillStyle = `rgba(20,14,8,${Math.min(0.42, m * 0.42)})`;
-      ctx.fillRect(c * COL, sy + 6, COL * step + 0.5, 150);
+      // wet soil darkens, and the wet front reaches deeper the wetter it is (water sinking in)
+      ctx.fillStyle = `rgba(20,14,8,${Math.min(0.5, m * 0.5)})`;
+      ctx.fillRect(c * COL, sy + 4, COL * step + 0.5, 30 + m * 230);
     }
     // groundwater table: saturated zone tinted blue + a wavy line
     const k0 = Math.floor(c0 / CHUNK_COLS) - 1, k1 = Math.floor(c1 / CHUNK_COLS) + 1;
@@ -204,8 +211,8 @@ export function createWater({ terrain }) {
       ctx.lineTo(x, y);
     }
     ctx.lineTo(view.x + view.w + 50, pts[pts.length - 1][1]);
-    ctx.lineTo(view.x + view.w + 50, G + BEDROCK);
-    ctx.lineTo(view.x - 50, G + BEDROCK);
+    ctx.lineTo(view.x + view.w + 50, G + AQUIFER);
+    ctx.lineTo(view.x - 50, G + AQUIFER);
     ctx.closePath();
     ctx.fillStyle = 'rgba(60,130,220,.22)';
     ctx.fill();
@@ -222,10 +229,13 @@ export function createWater({ terrain }) {
     const runs = [];
     for (let c = c0; c <= c1 + 1; c++) {
       const d = depth(c);
-      if (d > 0.6 && c <= c1) { if (!run) runs.push((run = [])); run.push(c); } else run = null;
+      if (d > 0.15 && c <= c1) { if (!run) runs.push((run = [])); run.push(c); } else run = null;
     }
+    // thin rain puddles are drawn at least ~3 screen px thick so you can see them pool, spread and sink in
+    const minT = 3 / Math.max(0.05, cam.z);
+    const vis = (c) => Math.max(depth(c), Math.min(minT, depth(c) * 40));
     for (const r of runs) {
-      const top = (c) => G - th(c) - depth(c);
+      const top = (c) => G - th(c) - vis(c);
       // water body
       ctx.beginPath();
       const first = r[0], last = r[r.length - 1];
@@ -242,7 +252,7 @@ export function createWater({ terrain }) {
       ctx.fillStyle = g;
       ctx.fill();
       // surface highlight
-      ctx.strokeStyle = 'rgba(220,245,255,.85)'; ctx.lineWidth = 2.5;
+      ctx.strokeStyle = 'rgba(220,245,255,.85)'; ctx.lineWidth = Math.max(1.5, 1.6 / Math.max(0.05, cam.z));
       ctx.beginPath();
       r.forEach((c, i) => { const y = top(c) + wave(c); i ? ctx.lineTo(c * COL + COL / 2, y) : ctx.moveTo(c * COL + COL / 2, y); });
       ctx.stroke();

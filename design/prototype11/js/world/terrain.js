@@ -4,10 +4,11 @@
 
 export const COL = 16;
 const CHUNK = 64; // columns per physics chunk (1024px)
-const MIN_H = -420; // deepest dig (bedrock below)
-const MAX_H = 2400; // highest hill
-export const BEDROCK = 450; // bedrock depth below the base ground line
-export const MATS = { grass: 0, sand: 1, clay: 2, rock: 3, dirt: 4 };
+const MIN_H = -2940; // deepest dig (bedrock below)
+const MAX_H = 4000; // highest hill
+export const BEDROCK = 3000; // 30 m
+export const AQUIFER = 2000; // gravel + sand that holds groundwater, down to 20 m // bedrock depth below the base ground line
+export const MATS = { grass: 0, sand: 1, clay: 2, rock: 3, dirt: 4, cement: 5 };
 const MAT_NAMES = Object.keys(MATS);
 const MAT_FRICTION = [0.85, 0.95, 0.8, 0.6, 0.85, 0, 0, 0, 0, 0.01]; // 9 = ice
 
@@ -54,9 +55,9 @@ export function createTerrain({ groundY }) {
       const w = Math.cos((d * Math.PI) / 2) ** 2; // smooth falloff
       const cur = h(c);
       if (MATS[mode] != null) { if (w > 0.25) { if (mode === 'grass') MAT.delete(c); else MAT.set(c, MATS[mode]); dirty.add(Math.floor(c / CHUNK)); version++; } continue; }
-      if (MAT.get(c) === MATS.rock && mode === 'lower') continue;
-      if (mode === 'raise') setH(c, cur + 26 * k * w);
-      else if (mode === 'lower') setH(c, cur - 26 * k * w);
+      if ((MAT.get(c) === MATS.rock || MAT.get(c) === MATS.cement) && mode === 'lower') continue;
+      if (mode === 'raise') setH(c, cur + 9 * k * w);
+      else if (mode === 'lower') setH(c, cur - 9 * k * w);
       else if (mode === 'flatten') setH(c, cur + (target - cur) * Math.min(1, 0.25 * k * w));
       else if (mode === 'smooth') {
         const i = c - c0;
@@ -172,16 +173,18 @@ export function createTerrain({ groundY }) {
     const band = (depth, fill) => {
       ctx.beginPath();
       let any = false;
-      pts.forEach(([x, y], i) => { const yy = Math.min(y + depth, Math.max(groundY + BEDROCK, y + 2)); if (yy < bottom) any = true; i ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); });
+      // layers stay at fixed depths (a hole cuts through them); only the topsoil follows the surface
+      pts.forEach(([x, y], i) => { const lay = depth === 0 ? y : Math.max(y + Math.min(depth, 60), groundY + depth); const yy = Math.min(lay, Math.max(groundY + BEDROCK, y + 2)); if (yy < bottom) any = true; i ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); });
       if (!any) return;
       ctx.lineTo(pts[pts.length - 1][0], bottom); ctx.lineTo(pts[0][0], bottom); ctx.closePath();
       ctx.fillStyle = fill; ctx.fill();
     };
     // soil bands
     band(0, '#6e4b2e');
-    band(70, '#80593a');
-    band(190, '#93684a');
-    band(340, '#7b746c');
+    band(60, '#80593a');
+    band(250, '#93684a');
+    band(700, '#a08a6c'); // gravel + sand aquifer
+    band(AQUIFER, '#7b746c'); // weathered rock
     // bedrock (absolute)
     if (groundY + BEDROCK < bottom) {
       const gy = groundY + BEDROCK;
@@ -199,9 +202,9 @@ export function createTerrain({ groundY }) {
       for (let c = c0; c <= c1; c += step) {
         const r = hash(c), sy = groundY - h(c), x = c * COL;
         if (sy > bottom) continue;
-        if (r < 0.22) { const dy = 30 + hash(c + 9) * 380, rad = 5 + hash(c + 3) * 12; if (sy + dy < Math.min(bottom, groundY + BEDROCK)) { ctx.fillStyle = dy > 190 ? '#9a928a' : '#5a3d24'; ctx.beginPath(); ctx.ellipse(x, sy + dy, rad * 1.4, rad, hash(c + 1) * 3, 0, Math.PI * 2); ctx.fill(); } }
+        if (r < 0.22) { const dy = 30 + hash(c + 9) * 2800, rad = 5 + hash(c + 3) * 12; if (sy + dy < Math.min(bottom, groundY + BEDROCK)) { ctx.fillStyle = dy > 700 ? '#9a928a' : '#5a3d24'; ctx.beginPath(); ctx.ellipse(x, sy + dy, rad * 1.4, rad, hash(c + 1) * 3, 0, Math.PI * 2); ctx.fill(); } }
         if (r > 0.86 && (MAT.get(c) ?? 0) === 0) { ctx.strokeStyle = 'rgba(60,35,18,.65)'; ctx.lineWidth = 2.5 / Math.max(z, 0.5); ctx.beginPath(); ctx.moveTo(x, sy + 10); ctx.quadraticCurveTo(x + 14 - hash(c + 4) * 28, sy + 40, x + 8 - hash(c + 7) * 16, sy + 70 + hash(c + 2) * 40); ctx.stroke(); }
-        if (r > 0.995) { ctx.strokeStyle = '#e8d9c0'; ctx.lineWidth = 3; const fx = x, fy = sy + 250 + hash(c + 5) * 120; ctx.beginPath(); ctx.arc(fx, fy, 20, 0, Math.PI * 1.6); ctx.arc(fx, fy, 11, Math.PI * 1.6, 0, true); ctx.stroke(); }
+        if (r > 0.995) { ctx.strokeStyle = '#e8d9c0'; ctx.lineWidth = 3; const fx = x, fy = sy + 900 + hash(c + 5) * 1600; ctx.beginPath(); ctx.arc(fx, fy, 20, 0, Math.PI * 1.6); ctx.arc(fx, fy, 11, Math.PI * 1.6, 0, true); ctx.stroke(); }
       }
     }
     // surface strip per material
@@ -223,6 +226,10 @@ export function createTerrain({ groundY }) {
     surfaceStroke(MATS.sand, '#e6cf8f', 30);
     surfaceStroke(MATS.clay, '#b35f3b', 18);
     surfaceStroke(MATS.rock, '#8e8a86', 26);
+    surfaceStroke(MATS.cement, '#c9ccd0', 22);
+    // cement: expansion joints
+    ctx.strokeStyle = 'rgba(90,95,100,.55)'; ctx.lineWidth = 1.5;
+    for (let i = 0; i < pts.length; i++) { const c = c0 + i * step; if ((MAT.get(c) ?? 0) === MATS.cement && c % 8 === 0) { ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i][0], pts[i][1] + 20); ctx.stroke(); } }
     surfaceStroke(MATS.grass, gcol[1], 14);
     // grass blades (swaying)
     if (z > 0.14) {
@@ -268,6 +275,8 @@ export function createTerrain({ groundY }) {
   return {
     setTopHook: (fn) => { topHook = fn; },
     markDirty: (c) => { dirty.add(Math.floor(c / CHUNK)); },
+    /** Every column whose height was changed (sparse): fn(col, height). */
+    forEachCol: (fn) => H.forEach((v, c) => fn(c, v)),
     groundY, surfaceY, slopeAt, matAt, brush, hill, shape, paint, heightAtCol, colOf,
     attach, syncBodies, chunkOf, serialize, load, draw, profile,
     get version() { return version; },

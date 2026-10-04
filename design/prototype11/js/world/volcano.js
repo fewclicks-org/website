@@ -131,7 +131,7 @@ export function createVolcano({ terrain, water, fire, flora, spawn, sfx, clockGe
       const c = crater(v);
       const hot = v.phase === 'calm' ? v.glow : 1;
       // magma chamber in the bedrock + the conduit up to the crater
-      const cy = G + BEDROCK + 40, rx = R * 0.32, ry = 110;
+      const cy = G + BEDROCK - 250, rx = R * 0.42, ry = 170;
       if (cy - ry < view.y + view.h) {
         const pulse = 0.85 + Math.sin(t * 2 + v.x) * 0.15;
         ctx.save();

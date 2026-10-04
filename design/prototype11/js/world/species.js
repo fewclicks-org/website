@@ -4,14 +4,14 @@
 
 export const SPECIES = {
   // flowers
-  tulip: { name: 'Tulip', cat: 'Flowers', sprite: 'tulip', h: 45, thirst: 40 },
-  sunflower: { name: 'Sunflower', cat: 'Flowers', sprite: 'sunflower', h: 200, thirst: 60, followsSun: true },
-  daisy: { name: 'Daisy', cat: 'Flowers', sprite: 'daisy', h: 35, thirst: 35 },
-  rose: { name: 'Rose', cat: 'Flowers', sprite: 'rose', h: 60, thirst: 45 },
-  hibiscus: { name: 'Hibiscus', cat: 'Flowers', sprite: 'hibiscus', h: 120, thirst: 45 },
-  hyacinth: { name: 'Hyacinth', cat: 'Flowers', sprite: 'hyacinth', h: 30, thirst: 40 },
-  blossom: { name: 'Cherry blossom', cat: 'Flowers', sprite: 'blossom', h: 40, thirst: 40 },
-  lotus: { name: 'Lotus (water)', cat: 'Flowers', sprite: 'lotus', h: 30, thirst: 30, aquatic: true },
+  tulip: { name: 'Tulip', cat: 'Flowers', sprite: 'tulip', h: 45, head: 18, thirst: 40 },
+  sunflower: { name: 'Sunflower', cat: 'Flowers', sprite: 'sunflower', h: 200, head: 60, thirst: 60, followsSun: true },
+  daisy: { name: 'Daisy', cat: 'Flowers', sprite: 'daisy', h: 35, head: 12, thirst: 35 },
+  rose: { name: 'Rose', cat: 'Flowers', sprite: 'rose', h: 60, head: 18, thirst: 45 },
+  hibiscus: { name: 'Hibiscus', cat: 'Flowers', sprite: 'hibiscus', h: 120, head: 30, thirst: 45 },
+  hyacinth: { name: 'Hyacinth', cat: 'Flowers', sprite: 'hyacinth', h: 30, head: 14, thirst: 40 },
+  blossom: { name: 'Cherry blossom', cat: 'Flowers', sprite: 'blossom', h: 40, head: 12, thirst: 40 },
+  lotus: { name: 'Lotus (water)', cat: 'Flowers', sprite: 'lotus', h: 30, head: 30, thirst: 30, aquatic: true },
   // trees
   oak: { name: 'Oak tree', cat: 'Trees', sprite: 'deciduous', h: 1000, thirst: 130, deciduous: true },
   maple: { name: 'Maple tree', cat: 'Trees', sprite: 'deciduous', h: 900, thirst: 120, deciduous: true, autumn: 'red', overlay: { sprite: 'maple', seasons: [2], n: 6 } },
