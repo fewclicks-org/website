@@ -4,9 +4,9 @@
 
 export const COL = 16;
 const CHUNK = 64; // columns per physics chunk (1024px)
-const MIN_H = -880; // deepest dig (bedrock below)
+const MIN_H = -420; // deepest dig (bedrock below)
 const MAX_H = 2400; // highest hill
-export const BEDROCK = 1000; // bedrock depth below the base ground line
+export const BEDROCK = 450; // bedrock depth below the base ground line
 export const MATS = { grass: 0, sand: 1, clay: 2, rock: 3, dirt: 4 };
 const MAT_NAMES = Object.keys(MATS);
 const MAT_FRICTION = [0.85, 0.95, 0.8, 0.6, 0.85, 0, 0, 0, 0, 0.01]; // 9 = ice
@@ -71,6 +71,13 @@ export function createTerrain({ groundY }) {
       const t = (c * COL - x0) / (x1 - x0);
       if (t < 0 || t > 1) continue;
       setH(c, h(c) + height * Math.sin(t * Math.PI) ** 2);
+    }
+  }
+  /** Add f(d) to the height of every column within r of x (d = -1..1). Used by volcanoes + lava. */
+  function shape(x, r, f) {
+    for (let c = colOf(x - r); c <= colOf(x + r); c++) {
+      const d = (c * COL + COL / 2 - x) / r;
+      if (Math.abs(d) <= 1) setH(c, h(c) + f(d));
     }
   }
   function paint(mat, x0, x1) { for (let c = colOf(x0); c <= colOf(x1); c++) { if (mat === 'grass') MAT.delete(c); else MAT.set(c, MATS[mat]); } version++; }
@@ -172,9 +179,9 @@ export function createTerrain({ groundY }) {
     };
     // soil bands
     band(0, '#6e4b2e');
-    band(150, '#80593a');
-    band(420, '#93684a');
-    band(760, '#7b746c');
+    band(70, '#80593a');
+    band(190, '#93684a');
+    band(340, '#7b746c');
     // bedrock (absolute)
     if (groundY + BEDROCK < bottom) {
       const gy = groundY + BEDROCK;
@@ -192,9 +199,9 @@ export function createTerrain({ groundY }) {
       for (let c = c0; c <= c1; c += step) {
         const r = hash(c), sy = groundY - h(c), x = c * COL;
         if (sy > bottom) continue;
-        if (r < 0.22) { const dy = 40 + hash(c + 9) * 640, rad = 5 + hash(c + 3) * 12; if (sy + dy < Math.min(bottom, groundY + BEDROCK)) { ctx.fillStyle = dy > 420 ? '#9a928a' : '#5a3d24'; ctx.beginPath(); ctx.ellipse(x, sy + dy, rad * 1.4, rad, hash(c + 1) * 3, 0, Math.PI * 2); ctx.fill(); } }
+        if (r < 0.22) { const dy = 30 + hash(c + 9) * 380, rad = 5 + hash(c + 3) * 12; if (sy + dy < Math.min(bottom, groundY + BEDROCK)) { ctx.fillStyle = dy > 190 ? '#9a928a' : '#5a3d24'; ctx.beginPath(); ctx.ellipse(x, sy + dy, rad * 1.4, rad, hash(c + 1) * 3, 0, Math.PI * 2); ctx.fill(); } }
         if (r > 0.86 && (MAT.get(c) ?? 0) === 0) { ctx.strokeStyle = 'rgba(60,35,18,.65)'; ctx.lineWidth = 2.5 / Math.max(z, 0.5); ctx.beginPath(); ctx.moveTo(x, sy + 10); ctx.quadraticCurveTo(x + 14 - hash(c + 4) * 28, sy + 40, x + 8 - hash(c + 7) * 16, sy + 70 + hash(c + 2) * 40); ctx.stroke(); }
-        if (r > 0.995) { ctx.strokeStyle = '#e8d9c0'; ctx.lineWidth = 3; const fx = x, fy = sy + 500 + hash(c + 5) * 200; ctx.beginPath(); ctx.arc(fx, fy, 20, 0, Math.PI * 1.6); ctx.arc(fx, fy, 11, Math.PI * 1.6, 0, true); ctx.stroke(); }
+        if (r > 0.995) { ctx.strokeStyle = '#e8d9c0'; ctx.lineWidth = 3; const fx = x, fy = sy + 250 + hash(c + 5) * 120; ctx.beginPath(); ctx.arc(fx, fy, 20, 0, Math.PI * 1.6); ctx.arc(fx, fy, 11, Math.PI * 1.6, 0, true); ctx.stroke(); }
       }
     }
     // surface strip per material
@@ -261,7 +268,7 @@ export function createTerrain({ groundY }) {
   return {
     setTopHook: (fn) => { topHook = fn; },
     markDirty: (c) => { dirty.add(Math.floor(c / CHUNK)); },
-    groundY, surfaceY, slopeAt, matAt, brush, hill, paint, heightAtCol, colOf,
+    groundY, surfaceY, slopeAt, matAt, brush, hill, shape, paint, heightAtCol, colOf,
     attach, syncBodies, chunkOf, serialize, load, draw, profile,
     get version() { return version; },
     get dirtyCount() { return dirty.size; },

@@ -9,7 +9,7 @@ import { COL, BEDROCK } from './terrain.js';
 
 const CAP = 70; // px of water one column of soil can hold before it is saturated
 const INFIL = [0.03, 0.12, 0.006, 0, 0.04]; // by material: grass, sand, clay, rock, dirt (px per tick at dry soil)
-const GW_DEFAULT = 620; // groundwater table: px below the base ground line
+const GW_DEFAULT = 260; // groundwater table: px below the base ground line
 const CHUNK_COLS = 64;
 
 export function createWater({ terrain }) {
@@ -108,7 +108,11 @@ export function createWater({ terrain }) {
         if (liquid <= 0) continue;
         // infiltration (frozen ground doesn't drink)
         const mo = moisture(cc);
-        let inf = temp < 0 ? 0 : INFIL[m] * (1 - mo * 0.85) * timeK;
+        // wet soil drinks slowly; saturated soil over a high water table drinks nothing (→ ponds)
+        const k = Math.floor(cc / CHUNK_COLS);
+        const tableGap = gwDepth(k) + th(cc); // px between the water table and this column's surface
+        let inf = temp < 0 || (mo > 0.97 && tableGap < 24) ? 0 : INFIL[m] * Math.max(0.04, (1 - mo) * (1 - mo)) * timeK;
+        if (mo > 0.97) inf = Math.min(inf, 0.004 * timeK); // saturated: only as fast as the table can rise
         inf = Math.min(inf, liquid);
         let nd = d - inf;
         let nm = mo + inf / CAP;
@@ -266,7 +270,7 @@ export function createWater({ terrain }) {
     (data?.w || []).forEach(([c, v]) => Wd.set(c, v / 10));
     (data?.i || []).forEach(([c, v]) => ICE.set(c, v / 10));
     (data?.m || []).forEach(([c, v]) => MO.set(c, v / 100));
-    (data?.g || []).forEach(([k, v]) => GW.set(k, v));
+    (data?.g || []).forEach(([k, v]) => GW.set(k, Math.min(BEDROCK - 20, v)));
     version++;
   }
   /** Dig a pond: lower the terrain and fill it with water (used by the seed + the gallery). */

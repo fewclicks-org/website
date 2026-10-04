@@ -79,7 +79,7 @@ export function createFlora({ terrain, water, spawn }) {
   /** Drawn height (px) for the current (animated) growth. */
   function height(p) {
     const sp = SPECIES[p.sp], g = p.gv;
-    if (g < STAGES[0]) return 26 + (g / STAGES[0]) * 20;
+    if (g < STAGES[0]) return 10 + (g / STAGES[0]) * 14; // a 10–24 cm sprout
     return sp.h * ((isTree(sp) ? 0.14 : 0.42) + (isTree(sp) ? 0.86 : 0.58) * clamp((g - STAGES[0]) / (1 - STAGES[0]), 0, 1));
   }
   function size(p) { return clamp(p.g, 0.05, 1); }

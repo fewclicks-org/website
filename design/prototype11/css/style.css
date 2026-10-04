@@ -536,3 +536,54 @@ body.dragging-new .viewport { box-shadow: inset 0 0 0 4px rgba(255, 59, 48, 0.35
 .dnd-ghost.can { margin: -20px 0 0 -67px; opacity: 0.95; }
 .can-ghost { display: block; width: 72px; height: 53px; transform: rotate(30deg); transform-origin: 67px 10.5px; }
 .can-ghost svg { width: 100%; height: 100%; }
+
+/* v5: stable list grids (hover never changes the column count), contained art */
+.g-body { overflow-x: hidden; scrollbar-gutter: stable; }
+.g-grid.labeled { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.g-grid.labeled button { min-width: 0; grid-template-rows: 56px auto; }
+.g-art { height: 56px; overflow: hidden; }
+.g-art svg { max-height: 56px; }
+.g-l { overflow-wrap: anywhere; }
+.g-art > .campfire { width: 56px; height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.g-art > .campfire .flame { width: 32px; height: 32px; margin: 0 0 -9px; }
+.g-art > .campfire .logs { width: 52px; height: 26px; object-fit: contain; }
+@media (max-width: 760px) { .g-grid.labeled { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* v5: true scale — 1 m = 100 px (tiny things are clamped to 12 px so their physics stays stable).
+   Board content (cards, notes, photos, text, stickers, title) keeps its size. */
+.it-sun .obj { width: 150px; }
+.it-lamp .obj { width: 40px; }
+.it-torch .obj { width: 25px; }
+.it-ball .obj { width: 22px; }
+.it-balloon .obj { width: 35px; }
+.it-camera .obj { width: 15px; }
+.it-cloud .obj { width: 900px; }
+.it-fire .obj { width: 100px; }
+.it-fan .obj { width: 44px; }
+.it-magnet .obj { width: 25px; }
+.it-dice .obj, .it-coin .obj, .it-clip .obj, .it-ice .obj, .it-duck .obj { width: 12px; }
+.it-clock .obj { width: 30px; }
+.it-spinner .obj { width: 60px; }
+.it-extinguisher .obj { width: 50px; }
+.it-tank .obj { width: 180px; }
+.it-bore .obj { width: 115px; }
+.it-bore.pump-wind .obj { width: 625px; }
+.it-bore.pump-solar .obj { width: 205px; }
+.it-sprinkler .obj { width: 30px; }
+.it-tap .obj { width: 25px; }
+.it-can .obj { width: 50px; }
+.it-bucket .obj { width: 35px; }
+.it-windsock .obj { width: 364px; }
+.it-flag .obj { width: 300px; }
+.it-kite .obj { width: 90px; }
+.it-fruit .obj { width: 12px !important; }
+/* tiny things: an invisible hit pad that stays ~14 screen px at any zoom; small pins and hints */
+.hitpad { position: absolute; inset: calc(-14px / var(--z, 1)); border-radius: 50%; }
+.it.tiny .pushpin { width: 14px; height: 14px; transform: translate(-50%, -9px); }
+.it.tiny .open-hint { font-size: 4px; padding: 1px 3px; bottom: -6px; right: 0; letter-spacing: 0.02em; }
+.dnd-ghost.can { margin: -20px 0 0 -67px; }
+.cl-rain { filter: brightness(0.86) saturate(0.7); }
+.cl-storm { filter: brightness(0.5) saturate(0.6); }
+/* volcano rumble */
+@keyframes quake { 0%, 100% { translate: 0 0; } 20% { translate: -2px 1px; } 40% { translate: 2px -1px; } 60% { translate: -1px -2px; } 80% { translate: 1px 2px; } }
+[data-viewport].quake { animation: quake 0.12s linear infinite; }

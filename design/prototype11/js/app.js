@@ -31,10 +31,11 @@ import { createAtmos } from './world/atmos.js';
 import { createDevices } from './world/pipes.js';
 import { createFlora } from './world/flora.js';
 import { createFire } from './world/fire.js';
+import { createVolcano } from './world/volcano.js';
 import { createWeather, STATES as WEATHER } from './world/weather.js';
 import { SPECIES, SPECIES_CATS } from './world/species.js';
 import { boreSvg, tankSvg, sprinklerSvg, tapSvg, canSvg, bucketSvg, windsockSvg, flagSvg, kiteSvg } from './art.js';
-import { PIPE_TYPES, ROOTED } from './items.js';
+import { PIPE_TYPES, ROOTED, PAPER_TYPES } from './items.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const viewport = $('[data-viewport]');
@@ -99,10 +100,27 @@ const devices = createDevices({
 });
 const flora = createFlora({ terrain, water, spawn: (p) => elements.spawn(p) });
 const fire = createFire({ terrain, water, flora, spawn: (p) => elements.spawn(p), sfx });
+const volcano = createVolcano({
+  terrain, water, fire, flora, sfx, reduced: reducedMotion,
+  spawn: (p) => elements.spawn(p),
+  clockGet: () => world.clock.get(),
+  api: {
+    quake(ms) { if (reducedMotion) return; viewport.classList.add('quake'); clearTimeout(viewport._qt); viewport._qt = setTimeout(() => viewport.classList.remove('quake'), ms); },
+    nudgeNear(x, r, f) { physics.map.forEach((rec) => { if (rec.item.pin || Math.abs(rec.body.position.x - x) > r) return; physics.push(rec, (Math.random() - 0.5) * f * 0.3, -f * 0.12); }); },
+    burnAt(x, y) {
+      const hit = physics.M.Query.point(physics.M.Composite.allBodies(physics.engine.world), { x, y }).find((b) => byId(b.label));
+      if (!hit) return false;
+      const it = byId(hit.label);
+      if (PAPER_TYPES.has(it.type)) { it.d.onfire = true; it.d.burn = Math.max(it.d.burn || 0, 0.05); const el = els.get(it.id); if (el) patch(el, it); }
+      return true;
+    },
+  },
+});
 const weather = createWeather({ terrain, camera, spawn: (p) => elements.spawn(p), strikeAt: (x, y) => elements.strikeAt(x, y) });
 elements.setExtraDraw({ active: () => water.activeCount > 0, draw: (ctx, view, cam) => water.drawFront(ctx, view, cam, world.time) });
 elements.setPipeFlow(devices.isFlowing);
 elements.setPipePort(devices.portOf);
+lights.setAnchor(devices.anchorWorld);
 water.setWind((x, y) => elements.windAt(x, y));
 // plants grow only from water reaching their roots (rain, drips, sprinklers, the watering can, puddles)
 let floraDirty = false;
@@ -113,13 +131,14 @@ world.systems.push({
     atmos.tick(dt, c, worldMin, world.weather);
     flora.tick(dt);
     fire.tick(dt, c, atmos.wind, world.weather);
+    volcano.tick(dt, atmos.wind);
     if (world.weather.snowing > 0 && worldMin > 0) world.weather.snow = Math.min(1, (world.weather.snow || 0) + world.weather.snowing * worldMin * 0.0006);
     world.weather.wind = atmos.wind;
     water.tick(dt, c, worldMin);
     // fresh snow on the ground melts above freezing
     world.weather.snow = Math.max(0, Math.min(1, world.weather.snow + elements.takeSnow() * 0.0012 - (c.temp > 0 ? 0.00025 * (1 + c.temp / 5) * (1 + worldMin * 30) : 0)));
   },
-  drawBack(ctx, view, cam, c, t) { water.drawBack(ctx, view, cam); fire.drawBack(ctx, view); devices.drawBack(ctx, view); flora.draw(ctx, view, cam, c, t, world.weather); },
+  drawBack(ctx, view, cam, c, t) { water.drawBack(ctx, view, cam); fire.drawBack(ctx, view); devices.drawBack(ctx, view); volcano.drawBack(ctx, view, cam, t); flora.draw(ctx, view, cam, c, t, world.weather); },
 });
 
 const inspector = createInspector({
@@ -180,6 +199,7 @@ function serialize() {
     water: water.serialize(),
     flora: flora.serialize(),
     fire: fire.serialize(),
+    volcano: volcano.serialize(),
     links: board.links,
     items: board.items.map(({ v, ...it }) => ({ ...it, x: +it.x.toFixed(1), y: +it.y.toFixed(1), a: +it.a.toFixed(4) })),
   }, (k, v) => (k.startsWith('_') ? undefined : v)));
@@ -240,11 +260,14 @@ function mountAll() {
   water.load(board.water);
   flora.load(board.flora);
   fire.load(board.fire);
+  volcano.load(board.volcano);
   // v2 water pools become real ponds dug into the ground
   for (const w of board.items.filter((i) => i.type === 'water')) water.pond(w.x - (w.d.w || 900) / 2, w.x + (w.d.w || 900) / 2, w.d.h || 220);
   board.items = board.items.filter((i) => i.type !== 'water');
   syncGround(true);
   [...board.items].sort((a, b) => a.z - b.z).forEach(mountItem);
+  // rooted things stand on the ground (sizes can change: true scale, re-traced outlines)
+  board.items.filter((i) => ROOTED.has(i.type)).forEach(rootItem);
   board.links = (board.links || []).filter((l) => byId(l.a) && byId(l.b));
   board.links.forEach((l) => physics.addLink(l));
   select(null);
@@ -330,7 +353,7 @@ function loop(now) {
     pourCan(dt);
     if (floraDirty && frame % 90 === 0) { floraDirty = false; save(); }
     fire.emit(v, Math.min(3, dt / 16.667));
-    if (frame % 10 === 0) world.weather.lights = fire.lights(v);
+    if (frame % 10 === 0) world.weather.lights = [...fire.lights(v), ...volcano.lights(v)];
   }
   devices.flushPatches((it) => { const el = els.get(it.id); if (el) patch(el, it); });
   if (moved || camDirty) {
@@ -468,7 +491,13 @@ viewport.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   if (performance.now() - lastMenuAt < 600) return;
   const el = e.target.closest('.it');
-  if (!el) { const w = camera.toWorld(e.clientX, e.clientY); const pl = flora.hit(w.x, w.y); if (pl) { openPlantMenu(e.clientX, e.clientY, pl); return; } }
+  if (!el) {
+    const w = camera.toWorld(e.clientX, e.clientY);
+    const vo = volcano.hit(w.x, w.y);
+    if (vo) { openVolcanoMenu(e.clientX, e.clientY, vo); return; }
+    const pl = flora.hit(w.x, w.y);
+    if (pl) { openPlantMenu(e.clientX, e.clientY, pl); return; }
+  }
   openContextMenu(e.clientX, e.clientY, el && byId(el.dataset.id));
 });
 
@@ -950,18 +979,19 @@ const GALLERY = {
     { name: 'Sun', svg: OBJECTS.sun, type: 'sun', d: {}, x: { s: 1.4 } },
     { name: 'Lamp', svg: OBJECTS.lamp, type: 'lamp', d: { temp: 'warm' } },
     { name: 'Torch', svg: OBJECTS.torch, type: 'torch', d: { beam: 0.42 }, x: { a: 0.3 } },
-    { name: 'Rain cloud', svg: cloudSvg('rain'), type: 'cloud', d: { mode: 'rain', amount: 0.6 }, x: { s: 1.4 } },
-    { name: 'Snow cloud', svg: cloudSvg('snow'), type: 'cloud', d: { mode: 'snow', amount: 0.5 }, x: { s: 1.4 } },
-    { name: 'Storm cloud', svg: cloudSvg('storm'), type: 'cloud', d: { mode: 'storm', amount: 0.7 }, x: { s: 1.5 } },
+    { name: 'Rain cloud', svg: cloudSvg('rain'), type: 'cloud', d: { mode: 'rain', amount: 0.6 }, x: { s: 1 } },
+    { name: 'Snow cloud', svg: cloudSvg('snow'), type: 'cloud', d: { mode: 'snow', amount: 0.5 }, x: { s: 1 } },
+    { name: 'Storm cloud', svg: cloudSvg('storm'), type: 'cloud', d: { mode: 'storm', amount: 0.7 }, x: { s: 1 } },
     { name: 'Campfire', svg: fireSvg(), type: 'fire', d: { lit: true, size: 1 } },
     { name: 'Magnet', svg: magnetSvg(), type: 'magnet', d: { strength: 1 } },
+    { name: 'Volcano', svg: tw('volcano'), type: '$volcano', tip: 'Tap the crater to make it erupt. Lava sets things on fire and cools into rock.' },
   ],
   Water: [
     { name: 'Watering can', svg: canSvg(), type: '$can', tip: 'Drag the can over your plants: it pours while you hold it.' },
     { name: 'Dig a pond', svg: POND_SVG, type: '$pond' },
-    { name: 'Hand-pump bore', svg: boreSvg('hand'), type: 'bore', d: { pump: 'hand', depth: 900 } },
-    { name: 'Windmill bore', svg: boreSvg('wind'), type: 'bore', d: { pump: 'wind', depth: 900 } },
-    { name: 'Solar bore', svg: boreSvg('solar'), type: 'bore', d: { pump: 'solar', depth: 900 } },
+    { name: 'Hand-pump bore', svg: boreSvg('hand'), type: 'bore', d: { pump: 'hand', depth: 400 } },
+    { name: 'Windmill bore', svg: boreSvg('wind'), type: 'bore', d: { pump: 'wind', depth: 400 } },
+    { name: 'Solar bore', svg: boreSvg('solar'), type: 'bore', d: { pump: 'solar', depth: 400 } },
     { name: 'Water tank', svg: tankSvg(), type: 'tank', d: { level: 0 } },
     { name: 'Tap', svg: tapSvg(), type: 'tap', d: { on: false } },
     { name: 'Sprinkler', svg: sprinklerSvg(), type: 'sprinkler', d: { on: true } },
@@ -1012,6 +1042,7 @@ function placeEntry(e, at) {
   if (e.type === 'spinner' && !d.labels && DATA) d.labels = DATA.games.map((g) => g.title.split(' ')[0]).slice(0, 6);
   if (e.type === '$pond') { digPond(p.x); return; }
   if (e.type === '$can') { toast(e.tip, 2600); return; }
+  if (e.type === '$volcano') { volcano.build(p.x); sfx.boing?.(); toast(e.tip, 3600); commit(); return; }
   if (e.type === 'sun' && board.items.some((i) => i.type === 'sun')) { const s0 = board.items.find((i) => i.type === 'sun'); physics.moveTo(s0.id, p.x, Math.min(groundAt(p.x, 200), p.y)); select(s0.id); toast('There is only one sun: moved it here. Higher = brighter.'); commit(); return; }
   const y = Math.min(groundAt(p.x, 120), p.y);
   addItem(makeItem(e.type, p.x + (at ? 0 : (Math.random() - 0.5) * 160), y, d, { ...(e.x || {}) }), { edit: !!e.edit, inspect: !!e.inspect });
@@ -1359,7 +1390,18 @@ function plantInfo(p) {
   const sp = SPECIES[p.sp];
   return `${sp.name} · ${flora.stage(p)} · ${Math.round(p.g * 100)}% grown${p.burnt > 0.5 ? ' · burnt: water it to bring it back' : p.g < 1 ? ' · water it to grow' : ''}`;
 }
+function openVolcanoMenu(x, y, v) {
+  menu.open(x, y, [
+    { header: v.phase === 'calm' ? 'Volcano · sleeping' : 'Volcano · erupting!' },
+    { label: 'Erupt', icon: ICONS.fire, disabled: v.phase !== 'calm', run: () => volcano.erupt(v) },
+    { label: 'Calm down', icon: ICONS.water, disabled: v.phase === 'calm', run: () => volcano.calm(v) },
+    '-',
+    { label: 'Remove volcano', icon: ICONS.trash, danger: true, run: () => { volcano.remove(v.id); sfx.whoosh(); commit(); } },
+  ]);
+}
 function onEmptyTap(pt) {
+  const vo = volcano.hit(pt.x, pt.y);
+  if (vo) { if (vo.phase === 'calm') { volcano.erupt(vo); toast('Rumble… the volcano is waking up!', 2000); } else toast('It is already erupting!', 1400); return; }
   const p = flora.hit(pt.x, pt.y);
   if (p) { toast(plantInfo(p), 3200); sfx.tick(); }
 }
@@ -1490,6 +1532,6 @@ addEventListener('beforeunload', () => save(true));
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(true); });
 
 // test hook for local automated checks (only with ?debug in the URL; nothing leaves the browser)
-if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, world, terrain, water, atmos, devices, flora, fire, weather, get board() { return board; }, byId, select, commit };
+if (new URLSearchParams(location.search).has('debug')) window.__wb = { physics, elements, lights, camera, world, terrain, water, atmos, devices, flora, fire, weather, volcano, get board() { return board; }, byId, select, commit };
 
 init();

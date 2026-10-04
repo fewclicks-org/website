@@ -2,7 +2,7 @@
 // item = { id, type, x, y, a (radians), s (scale), pin: 'pin'|'lock'|null, z, d: {...} }
 
 import {
-  STICKERS, OBJECTS, fontFamily, cloudSvg, fireSvg, fanSvg, magnetSvg, potSvg, plantSvg, diceSvg, clockSvg,
+  STICKERS, OBJECTS, fontFamily, cloudSvg, cloudWorldSvg, fireSvg, fanSvg, magnetSvg, potSvg, plantSvg, diceSvg, clockSvg,
   duckSvg, clipSvg, iceSvg, coinSvg, spinnerSvg, extinguisherSvg,
   boreSvg, fruitSvg, tankSvg, sprinklerSvg, tapSvg, canSvg, bucketSvg, windsockSvg, flagSvg, kiteSvg,
 } from './art.js';
@@ -22,7 +22,7 @@ export const FLOATERS = new Set(['fruit', 'note', 'text', 'photo', 'card', 'dood
 /** Things that connect with pipes. */
 export const PIPE_TYPES = new Set(['bore', 'tank', 'sprinkler', 'tap']);
 /** Things that stand in the ground (snap to the terrain, don't fall over). */
-export const ROOTED = new Set(['bore', 'windsock', 'flag', 'sprinkler']);
+export const ROOTED = new Set(['bore', 'windsock', 'flag', 'sprinkler', 'tank']);
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -43,11 +43,13 @@ export function pinOffset(item, w, h) {
   return { x: 0, y: -h / 2 + 12 };
 }
 
+/** Things smaller than ~40 px at true scale: they get an invisible hit pad. */
+const TINY = new Set(['torch', 'lamp', 'ball', 'balloon', 'camera', 'magnet', 'dice', 'coin', 'clip', 'ice', 'duck', 'tap', 'sprinkler', 'bucket', 'clock', 'fruit']);
 export function renderItem(item) {
   const el = document.createElement('div');
-  el.className = `it it-${item.type}`;
+  el.className = `it it-${item.type}${item.type === 'bore' ? ` pump-${item.d?.pump || 'hand'}` : ''}${TINY.has(item.type) ? ' tiny' : ''}`;
   el.dataset.id = item.id;
-  el.innerHTML = inner(item) + `<span class="pushpin" aria-hidden="true">${OBJECTS.pin}</span><span class="lockmark" aria-hidden="true"></span>`;
+  el.innerHTML = (TINY.has(item.type) ? '<i class="hitpad" aria-hidden="true"></i>' : '') + inner(item) + `<span class="pushpin" aria-hidden="true">${OBJECTS.pin}</span><span class="lockmark" aria-hidden="true"></span>`;
   el.setAttribute('role', 'group');
   el.setAttribute('aria-label', label(item));
   el.tabIndex = 0;
@@ -98,7 +100,7 @@ function inner(item) {
     case 'sun': case 'lamp': case 'torch': case 'ball': case 'balloon': case 'camera':
       return `<div class="obj">${OBJECTS[item.type]}</div>${item.type === 'camera' ? '<span class="open-hint">tap to snap</span>' : ''}`;
     case 'cloud':
-      return `<div class="obj">${cloudSvg(d.mode || 'rain')}</div>`;
+      return `<div class="obj">${cloudWorldSvg(d.mode || 'rain')}</div>`;
     case 'fire':
       return `<div class="obj fire">${fireSvg()}</div>`;
     case 'water':
@@ -124,7 +126,7 @@ function inner(item) {
     case 'spinner':
       return `<div class="obj">${spinnerSvg(d.labels || ['Play', 'Again', 'Win', 'GG', 'Wow', 'Yay'])}</div><span class="open-hint">tap to spin</span>`;
     case 'fruit':
-      return `<div class="obj" style="width:${d.big ? 96 : 56}px">${fruitSvg(d.kind)}</div>`;
+      return `<div class="obj">${fruitSvg(d.kind)}</div>`;
     case 'bore':
       return `<div class="obj">${boreSvg(d.pump || 'hand')}</div><span class="open-hint">${d.pump === 'hand' || !d.pump ? 'tap to pump' : 'right-click: pipe'}</span>`;
     case 'tank':

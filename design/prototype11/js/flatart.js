@@ -28,11 +28,15 @@ export const STICKER_GROUPS = {
 
 // ---------------- objects (Twemoji) ----------------
 const PIN = S(`<circle cx="20" cy="15" r="11" fill="${P.red}"/><circle cx="16.5" cy="11.5" r="3.5" fill="#fff" opacity=".55"/><rect x="18.6" y="24" width="2.8" height="13" rx="1.4" fill="${P.dgry}"/>`, '0 0 40 40');
+// Twemoji torch, flipped and turned 45deg so the beam points along +x (lens on the right, rays beyond it)
+const TORCH = `<svg viewBox="0 0 45.5 17" aria-hidden="true"><g transform="translate(5 -9.5) rotate(45 18 18) translate(36 0) scale(-1 1)"><path fill="#66757F" d="m23 17 1-1s1-1 2 0l2 2s1 1 0 2l-1 1-4-4z"/><path fill="#8899A6" d="M34.879 27.879a3.01 3.01 0 0 1 0 4.242l-2.758 2.758a3.01 3.01 0 0 1-4.242 0L9.121 16.121a3.008 3.008 0 0 1 0-4.242l2.758-2.758a3.008 3.008 0 0 1 4.242 0l18.758 18.758z"/><path fill="#66757F" d="M20.879 10.879a3.01 3.01 0 0 1 0 4.242l-5.758 5.758a3.01 3.01 0 0 1-4.242 0L6 16s-1-1 0-2l8-8c1-1 2 0 2 0l4.879 4.879z"/><path fill="#8899A6" d="M7 17 17 7l2 2L9 19z"/><path fill="#FFCC4D" d="M11.001 6a1 1 0 0 1-.896-.553l-2-4a1.001 1.001 0 0 1 1.79-.895l2 4A1 1 0 0 1 11.001 6zm-6.002 6a.99.99 0 0 1-.446-.106l-4-2a1 1 0 1 1 .894-1.788l4 2A1 1 0 0 1 4.999 12zM8 9a.997.997 0 0 1-.707-.293l-4-4a.999.999 0 1 1 1.414-1.414l4 4A.999.999 0 0 1 8 9z"/></g></svg>`;
 export const OBJECTS = {
-  sun: tw('sun'), lamp: tw('lamp'), torch: tw('torch', 'flipx'), ball: tw('ball'), balloon: tw('balloon'), camera: tw('camera'),
+  sun: tw('sun'), lamp: tw('lamp'), torch: TORCH, ball: tw('ball'), balloon: tw('balloon'), camera: tw('camera'),
   pin: PIN,
 };
 export const cloudSvg = (mode = 'rain') => tw({ rain: 'rain', snow: 'snowcloud', storm: 'storm', none: 'cloud' }[mode] || 'cloud');
+/** The cloud as it floats in the world: a plain Twemoji cloud, tinted by weather (real rain falls from it). */
+export const cloudWorldSvg = (mode = 'rain') => `<svg class="cl-${mode}" viewBox="0 1 36 31" aria-hidden="true"><path fill="#CCD6DD" d="M27 8a6.98 6.98 0 0 0-2.015.298c.005-.1.015-.197.015-.298a5.998 5.998 0 0 0-11.785-1.573A5.974 5.974 0 0 0 11 6a6 6 0 1 0 0 12 5.998 5.998 0 0 0 5.785-4.428A5.975 5.975 0 0 0 19 14c.375 0 .74-.039 1.096-.104-.058.36-.096.727-.096 1.104 0 3.865 3.135 7 7 7s7-3.135 7-7a7 7 0 0 0-7-7z"/><path fill="#E1E8ED" d="M31 22c-.467 0-.91.085-1.339.204.216-.526.339-1.1.339-1.704a4.5 4.5 0 0 0-4.5-4.5 4.459 4.459 0 0 0-2.701.921A6.497 6.497 0 0 0 16.5 12a6.497 6.497 0 0 0-6.131 4.357A8 8 0 1 0 8 32h23c2.762 0 5-2.238 5-5s-2.238-5-5-5z"/></svg>`;
 export const fireSvg = () => `<div class="campfire">${tw('fire', 'flame')}${tw('wood', 'logs')}</div>`;
 export const magnetSvg = () => tw('magnet');
 export const duckSvg = () => tw('duck');
@@ -122,6 +126,7 @@ export const windsockSvg = () => S(`<rect x="3" y="2" width="2.2" height="42" rx
  * inlet/outlet = pipe ports.
  */
 export const ANCHORS = {
+  torch: { vb: [45.5, 17], lens: [32, 8.5] },
   tap: { vb: [36, 32], spout: [30, 28.5], inlet: [0.5, 17] },
   tank: { vb: [36, 44], inlet: [18, 1], outlet: [36, 32.7], spout: [36, 32.7] },
   bore_hand: { vb: [36, 44], spout: [29.4, 24.2], outlet: [33, 41] },

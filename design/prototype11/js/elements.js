@@ -80,7 +80,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
         const L = 1000 * (f.d.power || 1) * f.s;
         if (along < 0 || along > L) continue;
         const perp = Math.abs(vx * dy - vy * dx);
-        if (perp > along * 0.42 + 70 * f.s) continue;
+        if (perp > along * 0.42 + 25 * f.s) continue;
         const fall = 1 - along / L;
         const pw = 1.1 * (f.d.power || 1) * fall * (FLOATERS.has(item.type) ? 1.3 : 0.7);
         physics.push(rec, dx * pw, dy * pw);
@@ -166,18 +166,45 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     const { w, h } = dims(cloud);
     strikeAt(cloud.x + (Math.random() - 0.5) * w * 0.4, cloud.y + h * 0.35, cloud.id);
   }
-  /** Lightning from (x0, y0) down to the first thing below it. */
+  /** A jagged random-walk path from (x0, y0) to (x1, y1). */
+  function zigzag(x0, y0, x1, y1, seg = 36, jit = 46) {
+    const n = Math.max(3, Math.round(Math.hypot(x1 - x0, y1 - y0) / seg));
+    const pts = [[x0, y0]];
+    let wx = 0;
+    for (let i = 1; i < n; i++) {
+      const k = i / n;
+      wx = wx * 0.8 + (Math.random() - 0.5) * jit;
+      pts.push([x0 + (x1 - x0) * k + wx * (1 - k * k), y0 + (y1 - y0) * k]);
+    }
+    pts.push([x1, y1]);
+    return pts;
+  }
+  const GROW = 9; // frames for the leader to reach the ground
+  /** Lightning from (x0, y0) down to the first thing below it: the bolt grows down, then strikes. */
   function strikeAt(x0, y0, skipId = null) {
     const hit = castDown(x0, y0, new Set(skipId ? [skipId] : []));
-    const pts = [[x0, y0]];
-    const steps = Math.max(4, Math.round((hit.y - y0) / 70));
-    for (let i = 1; i < steps; i++) pts.push([x0 + (Math.random() - 0.5) * 70, y0 + ((hit.y - y0) * i) / steps]);
-    pts.push([x0, hit.y]);
-    bolts.push({ pts, life: 16 });
-    lights.strike(1);
-    api.sfx.thunder();
-    for (let i = 0; i < 16; i++) add({ k: 'ember', x: x0, y: hit.y, vx: (Math.random() - 0.5) * 10, vy: -Math.random() * 8, life: 20 + Math.random() * 20, g: 0.4 });
-    const rec = hit.rec;
+    const pts = zigzag(x0, y0, x0, hit.y);
+    const branches = [];
+    for (let b = 0; b < 2 + Math.floor(Math.random() * 2); b++) {
+      const i = 1 + Math.floor(Math.random() * Math.max(1, pts.length * 0.6));
+      const [bx, by] = pts[Math.min(i, pts.length - 2)];
+      const len = (hit.y - by) * (0.25 + Math.random() * 0.35);
+      branches.push({ at: i / pts.length, pts: zigzag(bx, by, bx + (Math.random() < 0.5 ? -1 : 1) * len * 0.6, by + len, 28, 30) });
+    }
+    bolts.push({ pts, branches, t: 0, hit, x0, y0 });
+    lights.strike(x0, y0, 0.45, 520); // the cloud lights up from inside
+    mark();
+  }
+  /** The bolt reached the ground / item: flash, thunder (delayed by distance), sparks, damage. */
+  function impact(b) {
+    const { hit, x0 } = b;
+    lights.strike(x0, (b.y0 + hit.y) / 2, 1, Math.max(700, (hit.y - b.y0) * 0.9));
+    const v = camera.viewRect?.();
+    const dist = v ? Math.hypot(x0 - (v.x + v.w / 2), hit.y - (v.y + v.h / 2)) : 0;
+    setTimeout(() => api.sfx.thunder(), Math.min(3000, (dist / 34300) * 1000)); // sound: 343 m/s, 1 m = 100 px
+    for (let i = 0; i < 22; i++) add({ k: 'ember', x: x0, y: hit.y - 2, vx: (Math.random() - 0.5) * 12, vy: -Math.random() * 9, life: 20 + Math.random() * 24, g: 0.4 });
+    for (let i = 0; i < 10; i++) add({ k: 'smoke', x: x0 + (Math.random() - 0.5) * 60, y: hit.y - 10, vx: (Math.random() - 0.5) * 2, vy: -1, life: 60 + Math.random() * 40, r: 8 + Math.random() * 8 });
+    const rec = hit.rec && physics.map.has(hit.rec.item.id) ? hit.rec : null;
     if (rec) {
       const it = rec.item;
       if (it.pin === 'pin') { physics.setPin(it.id, null); api.syncState(it); }
@@ -232,7 +259,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
     for (const f of fans) {
       if (!near(f, view, 400)) continue;
       const dir = f.a + (f.d.dir < 0 ? Math.PI : 0);
-      if (Math.random() < 0.5 * t60) add({ k: 'wind', x: f.x + Math.cos(dir) * 70 * f.s, y: f.y - 10 * f.s + (Math.random() - 0.5) * 90 * f.s, vx: Math.cos(dir) * 14 * (f.d.power || 1), vy: Math.sin(dir) * 14 * (f.d.power || 1), life: 40 + Math.random() * 20 });
+      if (Math.random() < 0.5 * t60) add({ k: 'wind', x: f.x + Math.cos(dir) * 24 * f.s, y: f.y - 4 * f.s + (Math.random() - 0.5) * 30 * f.s, vx: Math.cos(dir) * 14 * (f.d.power || 1), vy: Math.sin(dir) * 14 * (f.d.power || 1), life: 40 + Math.random() * 20 });
     }
     const fanVec = fanVecRef = (x, y) => {
       let fx = 0, fy = 0;
@@ -415,7 +442,7 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
               if (startRun(p, rec)) { P.splice(i, 1); continue; }
             }
             if (p.k === 'rain' || p.k === 'drip') {
-              if (!rec) { water.add(p.x, 0.22); if (Math.random() < 0.5) splash(p.x, gy, 2); }
+              if (!rec) { water.add(p.x, 0.3); if (Math.random() < 0.5) splash(p.x, gy, 2); }
               else splash(p.x, p.y, 1);
             }
             if (p.k === 'snow' && !rec) groundSnow(p.x);
@@ -434,7 +461,14 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
         }
       }
     }
-    for (let i = bolts.length - 1; i >= 0; i--) if ((bolts[i].life -= t60) <= 0) bolts.splice(i, 1);
+    for (let i = bolts.length - 1; i >= 0; i--) {
+      const b = bolts[i];
+      const t0 = b.t;
+      b.t += t60;
+      if (t0 < GROW && b.t >= GROW) impact(b);
+      if (t0 < GROW + 9 && b.t >= GROW + 9) lights.strike(b.x0, (b.y0 + b.hit.y) / 2, 0.7, 700); // re-strike
+      if (b.t > GROW + 26) bolts.splice(i, 1);
+    }
     return changed;
   }
 
@@ -540,33 +574,33 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
   function drawPipe(A, B, l) {
     if (!pipePort) return;
     const pa = pipePort(A, B), pb = pipePort(B, A);
-    const s1 = { x: pa.p.x + pa.dir[0] * 26, y: pa.p.y + pa.dir[1] * 26 };
-    const s2 = { x: pb.p.x + pb.dir[0] * 26, y: pb.p.y + pb.dir[1] * 26 };
+    const s1 = { x: pa.p.x + pa.dir[0] * 14, y: pa.p.y + pa.dir[1] * 14 };
+    const s2 = { x: pb.p.x + pb.dir[0] * 14, y: pb.p.y + pb.dir[1] * 14 };
     const g1 = S(s1.x), g2 = S(s2.x);
     const nearGround = g1 - s1.y < 320 && g2 - s2.y < 320;
-    const yr = nearGround ? Math.max(g1, g2, S((s1.x + s2.x) / 2)) + 22 : Math.max(s1.y, s2.y) + 40;
+    const yr = nearGround ? Math.max(g1, g2, S((s1.x + s2.x) / 2)) + 14 : Math.max(s1.y, s2.y) + 40;
     const pts = [pa.p, s1, { x: s1.x, y: yr }, { x: s2.x, y: yr }, s2, pb.p];
     const path = new Path2D();
     path.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length - 1; i++) path.arcTo(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, 16);
+    for (let i = 1; i < pts.length - 1; i++) path.arcTo(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, 8);
     path.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
     ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#66757F'; ctx.lineWidth = 15; ctx.stroke(path);
-    ctx.strokeStyle = '#99AAB5'; ctx.lineWidth = 11; ctx.stroke(path);
-    ctx.strokeStyle = 'rgba(225,232,237,.9)'; ctx.lineWidth = 3; ctx.save(); ctx.translate(0, -2.5); ctx.stroke(path); ctx.restore();
+    ctx.strokeStyle = '#66757F'; ctx.lineWidth = 8; ctx.stroke(path);
+    ctx.strokeStyle = '#99AAB5'; ctx.lineWidth = 5.5; ctx.stroke(path);
+    ctx.strokeStyle = 'rgba(225,232,237,.9)'; ctx.lineWidth = 1.5; ctx.save(); ctx.translate(0, -1.2); ctx.stroke(path); ctx.restore();
     if (pipeFlow(l.id)) {
-      ctx.strokeStyle = 'rgba(85,172,238,.95)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
-      ctx.setLineDash([10, 16]); ctx.lineDashOffset = -performance.now() / 22;
+      ctx.strokeStyle = 'rgba(85,172,238,.95)'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+      ctx.setLineDash([5, 9]); ctx.lineDashOffset = -performance.now() / 22;
       ctx.stroke(path);
       ctx.setLineDash([]);
     }
     // collars on the bends + flanges on the devices
     ctx.fillStyle = '#66757F';
-    for (const q of [pts[1], pts[2], pts[3], pts[4]]) { ctx.beginPath(); ctx.arc(q.x, q.y, 9, 0, Math.PI * 2); ctx.fill(); }
+    for (const q of [pts[1], pts[2], pts[3], pts[4]]) { ctx.beginPath(); ctx.arc(q.x, q.y, 5, 0, Math.PI * 2); ctx.fill(); }
     for (const [q, d] of [[pa.p, pa.dir], [pb.p, pb.dir]]) {
       ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(Math.atan2(d[1], d[0]));
-      ctx.fillStyle = '#66757F'; ctx.fillRect(-2, -11, 8, 22);
-      ctx.fillStyle = '#CCD6DD'; ctx.fillRect(-1, -9, 3, 18);
+      ctx.fillStyle = '#66757F'; ctx.fillRect(-1, -6, 4, 12);
+      ctx.fillStyle = '#CCD6DD'; ctx.fillRect(-0.5, -5, 1.5, 10);
       ctx.restore();
     }
   }
@@ -741,12 +775,44 @@ export function createElements({ physics, lights, camera, canvas, els, sizes, ge
       ctx.beginPath(); ctx.ellipse(r.x, r.y, r.r, r.r * 0.3, 0, 0, Math.PI * 2); ctx.stroke();
     }
     // lightning
-    for (const b of bolts) {
-      for (const [w, col] of [[18, 'rgba(160,190,255,.35)'], [7, '#fff8c0'], [3, '#fff']]) {
-        ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineJoin = 'round';
-        ctx.beginPath(); b.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
-      }
+    for (const b of bolts) drawBolt(ctx, b, cam.z);
+  }
+
+  // leader grows down (thin, flickering) → bright return stroke → dim → re-strike → fade
+  function drawBolt(ctx, b, z = 1) {
+    const zk = Math.max(1, 0.7 / z); // stay visible when zoomed out
+    const grow = Math.min(1, b.t / GROW);
+    const path = (pts, frac) => {
+      const n = (pts.length - 1) * frac;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i <= Math.floor(n); i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      const f = n - Math.floor(n), j = Math.floor(n);
+      if (f > 0 && j + 1 < pts.length) ctx.lineTo(pts[j][0] + (pts[j + 1][0] - pts[j][0]) * f, pts[j][1] + (pts[j + 1][1] - pts[j][1]) * f);
+      ctx.stroke();
+    };
+    const t = b.t - GROW;
+    let a, wide;
+    if (t < 0) { a = 0.55 + Math.random() * 0.3; wide = 0.45; } // stepped leader
+    else if (t < 4) { a = 1; wide = 1; } // return stroke
+    else if (t < 9) { a = 0.25; wide = 0.6; }
+    else if (t < 13) { a = 0.95; wide = 0.9; } // re-strike
+    else { a = Math.max(0, 1 - (t - 13) / 13) * 0.7; wide = 0.7; }
+    if (a <= 0) return;
+    ctx.save();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    for (const [w, col] of [[22, `rgba(150,180,255,${0.3 * a})`], [8, `rgba(255,250,215,${0.85 * a})`], [3, `rgba(255,255,255,${a})`]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = w * wide * zk;
+      path(b.pts, grow);
+      for (const br of b.branches) { const bf = Math.max(0, Math.min(1, (grow - br.at) / Math.max(0.1, 1 - br.at))); if (bf > 0) { ctx.lineWidth = w * wide * 0.5 * zk; path(br.pts, t < 0 ? bf : bf * Math.max(0, 1 - t / 14)); ctx.lineWidth = w * wide * zk; } }
     }
+    // impact glow on the ground
+    if (t >= 0) {
+      const g = ctx.createRadialGradient(b.x0, b.hit.y, 0, b.x0, b.hit.y, 70);
+      g.addColorStop(0, `rgba(255,255,230,${0.8 * a})`); g.addColorStop(1, 'rgba(255,255,230,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x0, b.hit.y, 70, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
   }
 
   return {

@@ -119,7 +119,7 @@ export function createDevices({ physics, water, atmos, els, getItems, getLinks, 
         const pump = b.d.pump || 'hand';
         let rate = pump === 'wind' ? Math.min(6, Math.abs(wind) * 2.2) : pump === 'solar' ? sun * 4 : (b.d._burst || 0) * 7;
         if (pump === 'hand' && b.d._burst) b.d._burst = Math.max(0, b.d._burst - step * 0.6);
-        const got = rate > 0 ? water.pump(b.x, rate * step, b.d.depth || 900) : 0;
+        const got = rate > 0 ? water.pump(b.x, rate * step, b.d.depth || 400) : 0;
         b.d._dry = rate > 0 && got === 0;
         supply += got / step;
         b.d._flow = got > 0;
@@ -175,7 +175,7 @@ export function createDevices({ physics, water, atmos, els, getItems, getLinks, 
       if (it.type !== 'bore') continue;
       if (it.x < view.x - 200 || it.x > view.x + view.w + 200) continue;
       const base = anchorWorld(it, 'outlet');
-      const top = base.y, bottom = physics.groundY + (it.d.depth || 900);
+      const top = base.y, bottom = physics.groundY + (it.d.depth || 400);
       const tbl = water.tableY(it.x);
       ctx.fillStyle = '#5d646c';
       ctx.fillRect(it.x - 12, top, 24, bottom - top);

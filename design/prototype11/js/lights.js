@@ -14,7 +14,8 @@ export function createLights(canvas) {
   resize();
 
   let darkness = 0;
-  let flash = 0; // lightning flash 0..1, decays every frame
+  let flashes = []; // local lightning flashes {x, y, r, v} in world space, decaying every frame
+  let anchorOf = null; // (item, name) → world point of an art anchor (torch lens)
   const LAMP = { warm: '255,200,120', cool: '170,210,255', white: '255,255,240' };
 
   /**
@@ -23,8 +24,8 @@ export function createLights(canvas) {
   function draw(items, cam, flashlight, env = { dark: 0, warm: 0 }) {
     const amb = { dark: env.dark, warm: env.warm };
     darkness = amb.dark;
-    flash *= 0.86;
-    if (flash < 0.02) flash = 0;
+    flashes.forEach((f) => { f.v *= 0.86; });
+    flashes = flashes.filter((f) => f.v > 0.02);
     const t = performance.now();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
@@ -36,12 +37,19 @@ export function createLights(canvas) {
       ctx.fillStyle = `rgba(255,120,40,${amb.warm * 0.16})`;
       ctx.fillRect(0, 0, W, H);
     }
-    if (darkness < 0.06) { darkness = 0; drawFlash(); return darkness; }
+    const S = (x, y) => ({ x: (x - cam.x) * cam.z, y: (y - cam.y) * cam.z });
+    if (darkness < 0.06) { darkness = 0; drawFlash(S, cam); return darkness; }
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = `rgba(6,6,10,${darkness * (1 - flash)})`;
+    ctx.fillStyle = `rgba(6,6,10,${darkness})`;
     ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'destination-out';
-    const S = (x, y) => ({ x: (x - cam.x) * cam.z, y: (y - cam.y) * cam.z });
+    // lightning lights up only the area around the bolt
+    for (const f of flashes) {
+      const p = S(f.x, f.y), r = f.r * cam.z;
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0, `rgba(0,0,0,${Math.min(1, f.v)})`); g.addColorStop(0.5, `rgba(0,0,0,${f.v * 0.6})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+    }
     for (const it of items) {
       if (it.type === 'lamp') {
         const p = S(it.x, it.y + 30 * it.s);
@@ -51,8 +59,9 @@ export function createLights(canvas) {
         ctx.fillStyle = g;
         ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
       } else if (it.type === 'torch') {
-        const ang = it.a; // torch points along its +x axis
-        const tip = S(it.x + Math.cos(ang) * 48 * it.s, it.y + Math.sin(ang) * 48 * it.s);
+        const ang = it.a; // the torch art points along its +x axis; the beam starts at the lens
+        const lens = anchorOf?.(it, 'lens') || { x: it.x + Math.cos(ang) * 12 * it.s, y: it.y + Math.sin(ang) * 12 * it.s };
+        const tip = S(lens.x, lens.y);
         const len = 1300 * it.s * cam.z, spread = it.d?.beam || 0.42;
         const g = ctx.createRadialGradient(tip.x, tip.y, 0, tip.x, tip.y, len);
         g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.6, 'rgba(0,0,0,.8)'); g.addColorStop(1, 'rgba(0,0,0,0)');
@@ -93,14 +102,19 @@ export function createLights(canvas) {
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalCompositeOperation = 'source-over';
-    drawFlash();
+    drawFlash(S, cam);
     return darkness;
   }
-  function drawFlash() {
-    if (!flash) return;
+  /** A cool white glow around each lightning strike (local, never the whole screen). */
+  function drawFlash(S, cam) {
+    if (!flashes.length) return;
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = `rgba(235,240,255,${flash * 0.55})`;
-    ctx.fillRect(0, 0, W, H);
+    for (const f of flashes) {
+      const p = S(f.x, f.y), r = f.r * 0.8 * cam.z;
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0, `rgba(235,240,255,${f.v * 0.5})`); g.addColorStop(1, 'rgba(235,240,255,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+    }
   }
 
   /**
@@ -145,5 +159,12 @@ export function createLights(canvas) {
     el.style.filter = v;
   }
 
-  return { draw, shadows, resize, strike: (v = 1) => { flash = Math.max(flash, v); }, get flashing() { return flash > 0; }, get darkness() { return darkness; } };
+  return {
+    draw, shadows, resize,
+    /** Local lightning flash at world (x, y). */
+    strike(x, y, v = 1, r = 900) { flashes.push({ x, y, v, r }); if (flashes.length > 12) flashes.shift(); },
+    setAnchor(fn) { anchorOf = fn; },
+    get flashing() { return flashes.length > 0; },
+    get darkness() { return darkness; },
+  };
 }

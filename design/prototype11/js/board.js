@@ -2,7 +2,7 @@
 // The dot grid and the ground line are drawn in screen space so they never run out.
 
 export const MIN_Z = 0.05;
-export const MAX_Z = 4;
+export const MAX_Z = 16;
 
 export function createCamera(viewport, layer, { groundY, dots, onChange }) {
   const cam = { x: 0, y: 0, z: 0.5 };

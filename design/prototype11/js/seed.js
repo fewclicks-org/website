@@ -56,11 +56,11 @@ export function seedBoard({ games, studio, team, news }) {
 
   // weather corner: a rain cloud over a plant, next to a pond with a duck
   add('text', 6900, 1700, { text: 'weather corner ↓', font: 'marker', size: 54 }, { a: -0.04 });
-  add('cloud', 6450, 2150, { mode: 'rain', amount: 0.5 }, { s: 1.6 });
+  add('cloud', 6450, 1500, { mode: 'rain', amount: 0.5 }, { s: 1.2 });
   add('plant', 6450, GROUND_Y - 60, { species: 'sunflower', growth: 0.45 });
   add('duck', 7300, GROUND_Y - 300, {});
-  add('cloud', 7900, 2050, { mode: 'snow', amount: 0.4 }, { s: 1.3 });
-  add('cloud', 8300, 1500, { mode: 'storm', amount: 0.7 }, { s: 1.5 });
+  add('cloud', 7900, 1400, { mode: 'snow', amount: 0.4 }, { s: 1 });
+  add('cloud', 8800, 1200, { mode: 'storm', amount: 0.7 }, { s: 1.2 });
   add('plant', 8500, GROUND_Y - 60, { species: 'cactus', growth: 0.6 });
 
   // a campfire (far from the paper), a fan, a magnet with paperclips, a spinner and a clock
@@ -80,7 +80,7 @@ export function seedBoard({ games, studio, team, news }) {
   add('doodle', hi.x, hi.y, { strokes: hi.strokes, w: hi.w, h: hi.h });
 
   // water: a windmill bore pumps groundwater → tank → sprinkler over the garden
-  const bore = add('bore', 5850, GROUND_Y - 94, { pump: 'wind', depth: 900 });
+  const bore = add('bore', 5850, GROUND_Y - 94, { pump: 'wind', depth: 400 });
   const tank = add('tank', 6080, GROUND_Y - 90, { level: 0.4 });
   const spr = add('sprinkler', 6330, GROUND_Y - 58, { on: true });
   add('windsock', 4950, GROUND_Y - 92, {});
